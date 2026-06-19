@@ -1,0 +1,43 @@
+Sequence Model Integration Notes
+================================
+
+Overview
+--------
+- Implemented `ml/train_sequence_model.py`, a Temporal Fusion LSTM that aligns with *Deep Learning* (Goodfellow et al., 2016) recommendations for handling long-range dependencies.
+- Applied rolling `TimeSeriesSplit` cross-validation as urged by *Applied Machine Learning and AI for Engineers* (Anand et al., 2024) to avoid misleading single splits.
+- Added optional MLflow tracking hooks per the MLOps guidance in the *LLM Engineer's Handbook* (Savinov et al., 2024).
+- Preserved rigorous preprocessing (median imputation + z-score scaling) grounded in the mathematical foundations highlighted by *Mathematics for Machine Learning* (Deisenroth et al., 2020).
+- Integrated temporal attention-style summaries to increase interpretability and ongoing evaluation, echoing the risk-management focus of *AI Engineering* (Amershi et al., 2023).
+
+Data & Feature Pipeline
+-----------------------
+- `ml.dataset_builder.build_sequence_dataset` reuses the existing feature engineer, then packs sliding windows (default 60 timesteps) with static recommendation/short-report features.
+- The function records metadata (symbol, window end, target reference) so evaluation traces are reproducible.
+- Features are automatically split into temporal vs. static branches; pass `--static-features` or `--temporal-features` if custom overrides are needed.
+
+Training Workflow
+-----------------
+1. (Optional) Activate MLflow logging:
+   ```
+   export MLFLOW_TRACKING_URI=<uri>
+   ```
+2. Run the new trainer:
+   ```
+   python ml/train_sequence_model.py --config config.yaml --sequence-length 60 --epochs 30 --folds 5 --mlflow-uri $MLFLOW_TRACKING_URI
+   ```
+3. The artifact is saved to `ml/model.pt` (PyTorch) and includes:
+   - `state_dict` plus hyperparameters (`SequenceModelConfig`).
+   - Temporal/static feature lists and preprocessing objects for inference parity.
+   - Fold metrics, validation/test results, and citations for the PDFs consulted.
+
+Inference & Stocktrade Integration
+----------------------------------
+- `ml.predict.predict_next_day` now checks for `ml/model.pt` before falling back to the legacy `model.pkl`.
+- When a sequence model is loaded, `stocktrade.py` automatically supplies the engineered history so the new model participates in blended probabilities without additional wiring.
+- Explanations for the sequence model report the largest temporal feature deltas over the input window alongside the latest static snapshot.
+
+Operational Tips
+----------------
+- Ensure each symbol supplies at least `sequence_length` engineered rows; otherwise the helper will raise a descriptive error (captured in `stocktrade` logs).
+- Use `--limit` during early experimentation; the dataset builder already caches processed CSVs in `data/processed/` for inspection.
+- To compare against the tabular baseline, continue using `python ml/train_model.py` which writes `ml/model.pkl`; both artifacts can coexist.

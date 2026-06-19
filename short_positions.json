@@ -1,0 +1,34 @@
+[
+  {
+    "symbol": "WEB",
+    "name": "WEBJET LIMITED ORDINARY",
+    "short_positions": 40519170,
+    "float_total": 378684821,
+    "percent": 10.69997205,
+    "date": "2021-06-24"
+  },
+  {
+    "symbol": "KGN",
+    "name": "KOGAN.COM LTD ORDINARY",
+    "short_positions": 11290978,
+    "float_total": 106561563,
+    "percent": 10.59573235,
+    "date": "2021-06-24"
+  },
+  {
+    "symbol": "FLT",
+    "name": "FLIGHT CENTRE TRAVEL ORDINARY",
+    "short_positions": 19199621,
+    "float_total": 199323553,
+    "percent": 9.6323895,
+    "date": "2021-06-24"
+  },
+  {
+    "symbol": "ING",
+    "name": "INGHAMS GROUP ORDINARY",
+    "short_positions": 32388547,
+    "float_total": 371679601,
+    "percent": 8.71410401,
+    "date": "2021-06-24"
+  }
+]

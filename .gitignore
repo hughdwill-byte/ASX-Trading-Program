@@ -1,0 +1,24 @@
+# --- Virtual environment (machine-specific, never commit) ---
+.venv/
+venv/
+env/
+
+# --- Python cache / compiled files ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Downloaded / regenerable stock data ---
+# (also sidesteps the Windows-reserved PRN.json file)
+data/
+
+# --- Credentials & config (likely contain API keys) ---
+eoddata-api.json
+config.yaml
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
