@@ -94,6 +94,7 @@ Date           Recs   Wins  Losses  Skipped  Accuracy%   AvgRet%    Invested    
 Totals | Considered: 30706 | Recommended: 435 | Wins: 194 | Losses: 241 | Skipped: 170215 | Accuracy: 44.60% | Avg Return: 0.01% | Total Return: 5.88% | Invested: 2610.00 | PnL: 0.35 | ROI: 0.01%
 
 ############################################################################################## Test 2 ##############################################################################################
+Implemented Dynamic Investment Amount
 Historical performance | 2025-04-01 -> 2025-09-30
 Date           Recs   Wins  Losses  Skipped  Accuracy%   AvgRet%    Invested         PnL
 --------------------------------------------------------------------------------------------------------------
