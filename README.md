@@ -13,14 +13,31 @@ A research and backtesting tool for ASX equities. It ingests historical price da
 - **Recommendations** — scans the market and ranks top candidates with capital-aware position sizing.
 - **Sentiment** — optional VADER news-sentiment features.
 
+## Live dashboard
+
+**https://hughdwill-byte.github.io/ASX-Trading-Program/** shows today's TimesFM picks, forecast charts,
+and a cost-inclusive six-month backtest against the All Ordinaries. The `Daily picks website` GitHub
+Action rebuilds it every weekday at 5:17pm AEST (`.github/workflows/pages.yml`); run it on demand from
+the Actions tab. One-time setup: **Settings → Pages → Source: GitHub Actions**.
+
+## Quick start
+
+```bash
+pip install -r requirements.txt
+python stocktrade.py ingest                          # download prices (uses config.example.yaml if no config.yaml)
+python stocktrade.py tfm-recommend --capital 5000    # tomorrow's picks
+python stocktrade.py tfm-publish && python -m http.server -d docs   # dashboard at http://localhost:8000
+```
+
 ## Setup
 
 ```bash
-pip install numpy pandas requests scikit-learn yfinance pyyaml vaderSentiment colorama
-python stocktrade.py generate-config   # writes a sample config.yaml
+pip install -r requirements.txt
+cp config.example.yaml config.yaml    # optional: edit capital, brokerage, filters
 ```
 
-Edit `config.yaml` to set capital, risk parameters, and data sources.
+Without a `config.yaml` the program uses `config.example.yaml`. Optional extras for the legacy
+commands: `pip install vaderSentiment colorama`.
 
 ## Usage
 

@@ -1,0 +1,67 @@
+name: Daily picks website
+
+on:
+  schedule:
+    - cron: "17 7 * * 1-5"   # 5:17pm AEST / 6:17pm AEDT, after the ASX close
+  workflow_dispatch:
+  push:
+    branches: [main, "claude/**"]
+    paths:
+      - "docs/**"
+      - "ml/timesfm_strategy.py"
+      - "stocktrade.py"
+      - "config.example.yaml"
+      - "requirements.txt"
+      - ".github/workflows/pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies (CPU-only PyTorch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      - name: Restore model weights and forecast cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            data/timesfm_cache
+          key: timesfm-${{ github.run_id }}
+          restore-keys: timesfm-
+      - name: Self-check
+        run: python ml/test_timesfm_strategy.py
+      - name: Download latest ASX prices
+        run: python stocktrade.py --log-level WARNING ingest
+      - name: Forecast, backtest and build dashboard data
+        run: python stocktrade.py tfm-publish --out docs/data/latest.json
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

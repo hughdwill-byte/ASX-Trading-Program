@@ -823,12 +823,12 @@ class DataIngestor:
         )
         return unique_symbols
 
-    def fetch_ohlcv(self, symbol: str) -> pd.DataFrame:
+    def fetch_ohlcv(self, symbol: str, refresh: bool = False) -> pd.DataFrame:
         upper_symbol = symbol.upper()
         if upper_symbol in self.exclusions:
             raise ValueError(f"{upper_symbol} is excluded: {self.exclusions[upper_symbol]}")
         cache_path = project_path(self.config.base_path, f"{symbol}_ohlcv.csv")
-        if self.config.cache and (cached := load_csv_if_exists(cache_path)) is not None:
+        if self.config.cache and not refresh and (cached := load_csv_if_exists(cache_path)) is not None:
             logging.info("Loaded %s from cache.", symbol)
             return cached
 
@@ -953,6 +953,38 @@ class DataIngestor:
             threads=False,
             group_by="column",
         )
+        return self._normalise_yfinance(df, symbol)
+
+    def _download_yfinance_batch(self, symbols: List[str], chunk: int = 200) -> Dict[str, pd.DataFrame]:
+        """Download many tickers per request (threaded inside yfinance); far faster than one at a time."""
+        suffix = self.config.yfinance_suffix or ""
+        frames: Dict[str, pd.DataFrame] = {}
+        for start in range(0, len(symbols), chunk):
+            batch = symbols[start : start + chunk]
+            tickers = [sym if sym.endswith(suffix) else f"{sym}{suffix}" for sym in batch]
+            try:
+                raw = yf.download(
+                    tickers,
+                    start=self.config.start_date,
+                    end=self.config.end_date,
+                    auto_adjust=False,
+                    progress=False,
+                    threads=True,
+                    group_by="ticker",
+                )
+            except Exception as err:  # pragma: no cover - network dependent
+                logging.warning("Batch download failed (%s); falling back to per-symbol fetches.", err)
+                continue
+            if isinstance(raw.columns, pd.MultiIndex):
+                available = set(raw.columns.get_level_values(0))
+                for sym, ticker in zip(batch, tickers):
+                    if ticker in available:
+                        frames[sym] = self._normalise_yfinance(raw[ticker].dropna(how="all"), sym)
+            logging.info("Downloaded %s/%s symbols.", min(start + chunk, len(symbols)), len(symbols))
+        return frames
+
+    @staticmethod
+    def _normalise_yfinance(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
         if df.empty:
             return df
         if isinstance(df.columns, pd.MultiIndex):
@@ -1105,9 +1137,21 @@ class DataIngestor:
         self.latest_skipped = []
         exclusions_updated = False
 
+        prefetched: Dict[str, pd.DataFrame] = {}
+        if self.config.data_source.lower() == "yfinance" and yf is not None:
+            prefetched = self._download_yfinance_batch(filtered_symbols)
+
         for symbol in filtered_symbols:
             try:
-                results[symbol] = self.fetch_ohlcv(symbol)
+                df = prefetched.get(symbol)
+                if df is None:
+                    results[symbol] = self.fetch_ohlcv(symbol, refresh=True)
+                    continue
+                if df.empty:
+                    raise ValueError(f"No data returned for {symbol} from yfinance.")
+                if self.config.cache:
+                    to_csv(df, project_path(self.config.base_path, f"{symbol}_ohlcv.csv"))
+                results[symbol] = df
             except ValueError as err:
                 reason = str(err)
                 logging.warning("Skipping %s: %s", symbol, reason)
@@ -2177,12 +2221,21 @@ class TradingOrchestrator:
             logging.info("Starting ingestion for %s configured symbols.", len(symbols))
         else:
             exchange_code = (exchange or self.config.data.exchange).upper()
-            symbols = self.ingestor.fetch_exchange_symbols(exchange=exchange_code, max_symbols=limit)
+            try:
+                symbols = self.ingestor.fetch_exchange_symbols(exchange=exchange_code, max_symbols=limit)
+            except Exception as err:  # pragma: no cover - network dependent
+                logging.warning("Symbol directory lookup failed: %s", err)
+                symbols = []
             logging.info(
                 "Starting ingestion for %s symbols from exchange %s.",
                 len(symbols),
                 exchange_code,
             )
+        if not symbols:
+            cached_list = project_path("available_symbols.json")
+            if cached_list.exists():
+                symbols = json.loads(cached_list.read_text(encoding="utf-8"))
+                logging.info("Symbol directory unavailable; using %s symbols from %s.", len(symbols), cached_list.name)
         data = self.ingestor.ingest_all(symbols=symbols)
         logging.info("Ingestion finished.")
         return data
@@ -3406,6 +3459,13 @@ def build_parser() -> argparse.ArgumentParser:
     tfm_recommend = subparsers.add_parser("tfm-recommend", help="TimesFM picks for the next session.")
     tfm_recommend.add_argument("--capital", type=float, help="Override capital for position sizing.")
     add_cli_args(tfm_recommend)
+    tfm_publish = subparsers.add_parser(
+        "tfm-publish", help="Picks + backtests -> docs/data/latest.json for the dashboard website."
+    )
+    tfm_publish.add_argument("--start-date", help="Backtest start (default: --months before latest data).")
+    tfm_publish.add_argument("--months", type=int, default=6, help="Backtest window in months (default 6).")
+    tfm_publish.add_argument("--out", default="docs/data/latest.json", help="Output JSON path.")
+    add_cli_args(tfm_publish)
 
     return parser
 
@@ -3457,6 +3517,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         write_sample_config(sample_path)
         return 0
 
+    example_path = project_path("config.example.yaml")
+    if not config_path.exists() and args.config == "config.yaml" and example_path.exists():
+        logging.info("config.yaml not found; using config.example.yaml (copy it to config.yaml to customise).")
+        config_path = example_path
     app_config = AppConfig.load(config_path)
     orchestrator = TradingOrchestrator(app_config)
 
@@ -3541,7 +3605,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 print(highlight_text(line, bool(item.get("is_asx200"))))
             print(f"\nCapital used: {result['capital'] - result['remaining_capital']:.2f}")
             print(f"Capital remaining: {result['remaining_capital']:.2f}")
-    elif args.command in {"tfm-backtest", "tfm-recommend"}:
+    elif args.command in {"tfm-backtest", "tfm-recommend", "tfm-publish"}:
         from ml.timesfm_strategy import run_cli
 
         return run_cli(args, orchestrator)

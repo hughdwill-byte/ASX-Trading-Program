@@ -247,7 +247,8 @@ def run_backtest(
     trades: List[Dict[str, object]] = []
     started = time.monotonic()
 
-    rebalances = [i for i in positions[::hold] if i + hold < len(idx)]
+    # Anchored to absolute row numbers (not the start date) so a rolling window reuses cached forecasts.
+    rebalances = [i for i in positions if i % hold == 0 and i + hold < len(idx)]
     for n, i in enumerate(rebalances, start=1):
         if equity <= 0:
             logger.warning("Equity exhausted; stopping backtest.")
@@ -341,6 +342,8 @@ def run_cli(args, orchestrator) -> int:
 
     if not 1 <= args.hold <= HORIZON:
         raise SystemExit(f"--hold must be between 1 and {HORIZON}.")
+    if args.command == "tfm-publish":
+        args.signal = "timesfm"  # the dashboard always shows TimesFM picks; momentum runs alongside as baseline
     config = orchestrator.config
     started = time.monotonic()
     symbols = _resolve_symbol_list(None, config, orchestrator.ingestor, args.limit)
@@ -353,6 +356,8 @@ def run_cli(args, orchestrator) -> int:
 
     if args.command == "tfm-recommend":
         return _print_recommendations(panel, eligible, args, forecaster, cache_dir, config)
+    if args.command == "tfm-publish":
+        return publish(panel, eligible, args, forecaster, cache_dir, config, time.monotonic() - started)
 
     benchmark = load_benchmark(args.benchmark, config.data.base_path, config.data.start_date)
     report = run_backtest(panel, eligible, args, forecaster, cache_dir, config.backtest.initial_capital,
@@ -381,6 +386,114 @@ def _print_backtest(report: Dict[str, object], args) -> None:
                   f"{s['sharpe']:>7.2f} {100 * s['max_drawdown']:>8.2f}")
     print(f"\nTrades: {report['trades_count']} | Hit rate: {100 * report['hit_rate']:.1f}% | "
           f"Avg trade return: {100 * report['avg_trade_return']:+.2f}% | Ran in {report['elapsed_seconds']:.1f}s")
+
+
+def _company_info(base_path) -> Dict[str, Dict[str, str]]:
+    path = project_path(str(base_path), "asx_directory.csv")
+    if not path.exists():
+        return {}
+    df = pd.read_csv(path)
+    return {
+        str(row["symbol"]).upper(): {"name": str(row.get("company_name", "") or ""), "industry": str(row.get("industry", "") or "")}
+        for _, row in df.iterrows()
+    }
+
+
+def _floats(values) -> List[Optional[float]]:
+    return [float(v) if np.isfinite(v) else None for v in np.asarray(values, dtype=float)]
+
+
+def publish(panel, eligible, args, forecaster, cache_dir, config, load_seconds: float) -> int:
+    """Run picks + TimesFM and momentum backtests, write one JSON file for the dashboard (docs/)."""
+    import copy
+
+    started = time.monotonic()
+    idx = panel["adj_close"].index
+    last = idx[-1]
+    if not args.start_date:
+        args.start_date = (last - pd.DateOffset(months=args.months)).date().isoformat()
+    args.end_date = None
+    bt = config.backtest
+    benchmark = load_benchmark(args.benchmark, config.data.base_path, config.data.start_date)
+
+    tfm = run_backtest(panel, eligible, args, forecaster, cache_dir, bt.initial_capital,
+                       bt.trade_cost, bt.slippage_bps, benchmark)
+    _print_backtest(tfm, args)
+    mom_args = copy.copy(args)
+    mom_args.signal = "momentum"
+    mom = run_backtest(panel, eligible, mom_args, None, cache_dir, bt.initial_capital,
+                       bt.trade_cost, bt.slippage_bps, benchmark)
+
+    # Equity curves indexed to 100 at the first signal date.
+    periods = tfm["periods"]
+    def curve(returns):
+        return _floats(100 * np.cumprod([1.0] + [1 + (r if np.isfinite(r) else 0.0) for r in returns]))
+    dates = [periods[0]["signal_date"]] + [p["exit_date"] for p in periods] if periods else []
+    curves = {
+        "dates": [d.date().isoformat() for d in dates],
+        "timesfm": curve([p["return"] for p in periods]),
+        "momentum": curve([p["return"] for p in mom["periods"]]),
+        "universe": curve([p["universe_return"] for p in periods]),
+        "benchmark": curve([p["benchmark_return"] for p in periods]) if benchmark is not None else None,
+    }
+
+    # Today's picks, with recent price history and the forecast fan for the chart.
+    i = len(idx) - 1
+    picks, universe = pick(i, panel, eligible, args, forecaster, cache_dir, 2 * bt.slippage_bps / 10_000)
+    info = _company_info(config.data.base_path)
+    budget = bt.initial_capital * (1 - config.risk.min_cash_buffer) / args.top
+    paths = forecast_on(last, [p["symbol"] for p in picks], panel["adj_close"], forecaster, args.context, cache_dir) if picks else None
+    future = pd.bdate_range(last, periods=args.hold + 1)[1:]
+    recs = []
+    for j, p in enumerate(picks):
+        sym = p["symbol"]
+        price = float(panel["close"].iloc[i][sym])
+        scale = price / paths["last"][j]  # forecasts are on adjusted closes; show them in today's price terms
+        history = panel["close"][sym].iloc[-90:].dropna()
+        qty = math.floor(budget / price) if price > 0 else 0
+        recs.append({
+            **p, "price": price, "qty": qty, "spend": qty * price,
+            "name": info.get(sym, {}).get("name", ""), "industry": info.get(sym, {}).get("industry", ""),
+            "history": {"dates": [d.date().isoformat() for d in history.index], "close": _floats(history)},
+            "forecast": {"dates": [d.date().isoformat() for d in future],
+                         "median": _floats(paths["med"][j][: args.hold] * scale),
+                         "q10": _floats(paths["q10"][j][: args.hold] * scale),
+                         "q90": _floats(paths["q90"][j][: args.hold] * scale)},
+        })
+
+    strip = lambda r: {k: v for k, v in r.items() if k not in {"periods", "trades", "settings"}}
+    payload = {
+        "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
+        "data_date": last.date().isoformat(),
+        "symbols_loaded": int(panel["adj_close"].shape[1]),
+        "universe_size": len(universe),
+        "settings": {
+            "top": args.top, "hold": args.hold, "rank": args.rank, "context": args.context,
+            "checkpoint": args.checkpoint, "benchmark": args.benchmark, "capital": bt.initial_capital,
+            "trade_cost": bt.trade_cost, "slippage_bps": bt.slippage_bps,
+            "min_cash_buffer": config.risk.min_cash_buffer,
+            "filters": {"min_trading_days": config.filters.min_trading_days, "min_price": config.filters.min_price,
+                        "min_avg_dollar_volume": config.filters.min_avg_dollar_volume},
+        },
+        "recommendations": recs,
+        "backtest": {
+            "start": curves["dates"][0] if curves["dates"] else args.start_date,
+            "end": curves["dates"][-1] if curves["dates"] else None,
+            "timesfm": strip(tfm), "momentum": strip(mom), "curves": curves,
+            "recent_trades": [
+                {**t, "signal_date": t["signal_date"].date().isoformat(), "exit_date": t["exit_date"].date().isoformat()}
+                for t in tfm["trades"][-30:]
+            ][::-1],
+        },
+        "runtime_seconds": {"load": load_seconds, "model_and_backtests": time.monotonic() - started},
+    }
+    out = pathlib.Path(args.out)
+    if not out.is_absolute():
+        out = project_path(str(out))
+    ensure_directory(out.parent)
+    out.write_text(json.dumps(sanitize_for_json(payload), indent=1), encoding="utf-8")
+    print(f"\nDashboard data written to {out}")
+    return 0
 
 
 def _print_recommendations(panel, eligible, args, forecaster, cache_dir, config) -> int:

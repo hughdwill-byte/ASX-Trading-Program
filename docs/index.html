@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ASX TimesFM Picks</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Daily ASX stock picks from Google's TimesFM forecasting model, with a cost-inclusive backtest against the All Ordinaries.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M6 22l6-7 5 4 9-11' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a trading-desk sheet. Status strip, today's order tickets, then the track record, then the fine print. */
+:root {
+  color-scheme: light;
+  --page: #f6f7f4;          /* eucalyptus-tinted paper */
+  --surface: #fcfcfb;
+  --sunk: #eef0eb;
+  --ink: #0f1411;
+  --ink-2: #4c534d;
+  --muted: #858b84;
+  --grid: #e1e3dc;
+  --axis: #c3c6bd;
+  --line: rgba(15, 20, 17, 0.10);
+  --accent: #2a78d6;        /* TimesFM = series 1 everywhere */
+  --accent-wash: rgba(42, 120, 214, 0.14);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --good: #0ca30c; --good-text: #006300; --warn: #fab219; --bad: #d03b3b;
+  --hist: #9a9f97;
+  --f-display: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0e110f; --surface: #181b19; --sunk: #202421;
+    --ink: #eef0ea; --ink-2: #c1c6bd; --muted: #8b918a;
+    --grid: #2a2e2b; --axis: #3a3f3b; --line: rgba(255, 255, 255, 0.10);
+    --accent: #3987e5; --accent-wash: rgba(57, 135, 229, 0.20);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --good-text: #0ca30c; --hist: #6f756e;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0e110f; --surface: #181b19; --sunk: #202421;
+  --ink: #eef0ea; --ink-2: #c1c6bd; --muted: #8b918a;
+  --grid: #2a2e2b; --axis: #3a3f3b; --line: rgba(255, 255, 255, 0.10);
+  --accent: #3987e5; --accent-wash: rgba(57, 135, 229, 0.20);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --good-text: #0ca30c; --hist: #6f756e;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 15px/1.55 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1160px; margin: 0 auto; padding-block: 20px 64px; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); line-height: 1.1; }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 1.02rem; }
+p { margin: 0; max-width: 68ch; }
+a { color: var(--accent); }
+.eyebrow { font: 600 0.72rem/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.mono, .num { font-family: var(--f-mono); }
+.num { font-variant-numeric: tabular-nums; }
+.sub { color: var(--ink-2); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* Masthead */
+.mast { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: end; justify-content: space-between; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.mast-text { display: grid; gap: 8px; min-width: 0; }
+.status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: var(--sunk); font: 500 0.8rem/1 var(--f-mono); color: var(--ink-2); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.pill.fresh .dot { background: var(--good); }
+.pill.stale .dot { background: var(--warn); }
+.theme-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 0.8rem; }
+.banner { padding: 12px 16px; border-radius: var(--r); background: var(--sunk); border-left: 4px solid var(--warn); }
+
+/* Section heads */
+.sec { display: grid; gap: 18px; }
+.sec-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; justify-content: space-between; }
+.sec-head p { font-size: 0.92rem; }
+
+/* Order tickets */
+.tickets { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+.ticket { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.t-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.t-sym { font: 600 1.55rem/1 var(--f-mono); letter-spacing: 0.02em; }
+.t-name { font-size: 0.85rem; color: var(--ink-2); margin-top: 4px; overflow-wrap: anywhere; }
+.t-rank { font: 500 0.75rem/1 var(--f-mono); color: var(--muted); white-space: nowrap; }
+.t-fc { text-align: right; }
+.t-fc .big { font: 600 1.3rem/1 var(--f-mono); font-variant-numeric: tabular-nums; }
+.t-fc .lbl { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+.kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.kv div { display: grid; gap: 2px; min-width: 0; }
+.kv dt { font-size: 0.72rem; color: var(--muted); }
+.kv dd { margin: 0; font: 500 0.92rem/1.2 var(--f-mono); font-variant-numeric: tabular-nums; }
+.mini-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.74rem; color: var(--ink-2); }
+.key { display: inline-flex; align-items: center; gap: 6px; }
+.key i { display: inline-block; width: 14px; height: 2px; border-radius: 2px; }
+.key i.band { height: 10px; }
+.empty-picks { padding: 20px; border-radius: var(--r); background: var(--surface); border: 1px dashed var(--axis); color: var(--ink-2); }
+
+/* KPIs */
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.kpi { background: var(--surface); padding: 16px; display: grid; gap: 6px; align-content: start; }
+.kpi .v { font: 600 1.6rem/1.05 var(--f-display); }
+.kpi.hero .v { font-size: 2.6rem; }
+.kpi .d { font-size: 0.82rem; color: var(--ink-2); display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.arrow { font-size: 0.8em; }
+.arrow.up { color: var(--good); } .arrow.down { color: var(--bad); }
+
+@media (max-width: 720px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kpi.hero .v { font-size: 2rem; } }
+
+/* Chart cards */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: center; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.84rem; color: var(--ink-2); }
+.toggle { border: 1px solid var(--line); background: var(--sunk); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { font-family: var(--f-mono); font-size: 11px; fill: var(--muted); }
+.chart .end-label { fill: var(--ink); font-weight: 500; }
+.tip { position: absolute; pointer-events: none; z-index: 2; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.12); font-size: 0.78rem; min-width: 150px; display: grid; gap: 3px; }
+.tip .t-date { color: var(--muted); font-family: var(--f-mono); }
+.tip .row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tip .row span:first-child { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); }
+.tip .row b { font-family: var(--f-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Tables */
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+th, td { padding: 9px 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
+th { font: 600 0.7rem/1.2 var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--sunk); }
+td.r, th.r { text-align: right; }
+td.num { font-family: var(--f-mono); }
+tbody tr:last-child td { border-bottom: 0; }
+
+/* How it works */
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; counter-reset: step; margin: 0; padding: 0; list-style: none; }
+.steps li { counter-increment: step; display: grid; gap: 6px; align-content: start; padding-top: 14px; border-top: 2px solid var(--ink); }
+.steps li::before { content: "Step " counter(step); font: 600 0.72rem/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.steps p { font-size: 0.9rem; color: var(--ink-2); }
+
+.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 24px; align-items: start; }
+.settings { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; font-size: 0.9rem; }
+.settings dt { color: var(--muted); }
+.settings dd { margin: 0; font-family: var(--f-mono); overflow-wrap: anywhere; }
+.cmds { display: grid; gap: 10px; }
+.cmd { display: grid; gap: 4px; }
+.cmd .lbl { font-size: 0.82rem; color: var(--ink-2); }
+.code { display: flex; align-items: center; gap: 8px; background: var(--sunk); border-radius: 8px; padding: 8px 8px 8px 12px; min-width: 0; }
+.code code { font: 0.82rem/1.4 var(--f-mono); overflow-x: auto; white-space: pre; flex: 1; min-width: 0; }
+.copy { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 9px; cursor: pointer; font-size: 0.75rem; flex: none; }
+.risks { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; color: var(--ink-2); font-size: 0.92rem; max-width: 80ch; }
+.risks b { color: var(--ink); }
+footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82rem; color: var(--muted); display: grid; gap: 6px; }
+@media (prefers-reduced-motion: no-preference) { .ticket { transition: border-color .15s; } .ticket:hover { border-color: var(--axis); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <div class="mast-text">
+      <span class="eyebrow">ASX equities · daily forecast</span>
+      <h1>ASX TimesFM Picks</h1>
+      <p class="sub">Every weekday after the close, Google's TimesFM model forecasts the next few sessions for every liquid ASX stock. The strongest forecasts become tomorrow's picks, and the same rule is replayed over the last six months with real brokerage and slippage.</p>
+    </div>
+    <div class="status">
+      <span class="pill" id="data-pill"><span class="dot"></span><span id="data-date">Loading…</span></span>
+      <span class="pill" id="universe-pill">— stocks screened</span>
+      <button class="theme-btn" id="theme-btn" type="button" aria-label="Toggle colour theme">Theme</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <section class="sec" aria-labelledby="picks-h">
+    <div class="sec-head">
+      <h2 id="picks-h">Picks for the next session</h2>
+      <p class="sub" id="picks-sub">Buy at the open, sell at the close after the holding period.</p>
+    </div>
+    <div class="tickets" id="tickets"></div>
+  </section>
+
+  <section class="sec" aria-labelledby="perf-h">
+    <div class="sec-head">
+      <h2 id="perf-h">Track record</h2>
+      <p class="sub" id="perf-sub">Replayed with the same rules, after costs.</p>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h3>Growth of $100</h3>
+          <p class="sub" style="font-size:.84rem">Each line starts at 100 on the first rebalance date.</p>
+        </div>
+        <button class="toggle" id="eq-toggle" type="button" aria-pressed="false">Show as table</button>
+      </div>
+      <div class="legend" id="eq-legend"></div>
+      <div class="chart" id="eq-chart"></div>
+      <div class="tbl-wrap" id="eq-table" hidden></div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="trades-h">
+    <div class="sec-head">
+      <h2 id="trades-h">Recent trades</h2>
+      <p class="sub">Latest 30 backtest trades, newest first. P&amp;L includes brokerage on both legs.</p>
+    </div>
+    <div class="tbl-wrap" id="trades"></div>
+  </section>
+
+  <section class="sec" aria-labelledby="how-h">
+    <h2 id="how-h">How a pick is made</h2>
+    <ol class="steps">
+      <li><h3>Screen the market</h3><p>Start from every ASX listing. Keep stocks with 3+ years of history, a price of at least 25c and $500k+ average daily turnover.</p></li>
+      <li><h3>Forecast with TimesFM</h3><p>Feed each stock's last two years of daily closes to TimesFM 2.5, a pretrained time-series model. It returns a median path plus a 10th–90th percentile range.</p></li>
+      <li><h3>Rank by edge per unit of risk</h3><p>Score = forecast return ÷ width of the forecast range. Only forecasts that beat round-trip slippage qualify.</p></li>
+      <li><h3>Trade and repeat</h3><p>Buy the top picks at the next open in equal dollar amounts, sell at the close after the holding period, then rebalance.</p></li>
+    </ol>
+  </section>
+
+  <section class="two-col">
+    <div class="sec">
+      <h2>Settings used</h2>
+      <dl class="settings" id="settings"></dl>
+    </div>
+    <div class="sec">
+      <h2>Run it yourself</h2>
+      <div class="cmds" id="cmds"></div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="risk-h">
+    <h2 id="risk-h">Read before trading</h2>
+    <ul class="risks">
+      <li><b>Not financial advice.</b> This is a personal research project. Picks are model output, not recommendations to buy.</li>
+      <li><b>Past results do not predict future returns.</b> Six months is a short window; a strategy can beat the index by luck.</li>
+      <li><b>Survivorship bias.</b> The backtest only includes companies listed today, so stocks that collapsed and delisted are missing. Real results would likely be worse.</li>
+      <li><b>Costs scale with account size.</b> Brokerage is a fixed fee per order, so small accounts lose a far larger share to fees than the capital shown here.</li>
+      <li><b>Prices are end-of-day from Yahoo Finance</b> and can be late or wrong. Check the price before placing an order.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <span id="foot-gen">—</span>
+    <span>Forecasts by <a href="https://github.com/google-research/timesfm" target="_blank" rel="noopener">TimesFM 2.5</a> (Apache-2.0 weights). Source code: <a id="repo-link" href="https://github.com/hughdwill-byte/ASX-Trading-Program" target="_blank" rel="noopener">ASX-Trading-Program</a>.</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const SVG = "http://www.w3.org/2000/svg";
+  const $ = (id) => document.getElementById(id);
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function el(tag, attrs = {}, kids = []) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") n.className = v; else if (k === "text") n.textContent = v; else n.setAttribute(k, v);
+    }
+    for (const k of [].concat(kids)) if (k != null) n.append(k);
+    return n;
+  }
+  function s(tag, attrs = {}) {
+    const n = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
+  }
+  const fin = (x) => typeof x === "number" && isFinite(x);
+  const pct = (x, d = 2) => fin(x) ? `${x >= 0 ? "+" : "−"}${Math.abs(100 * x).toFixed(d)}%` : "n/a";
+  const money = (x) => fin(x) ? `${x < 0 ? "−" : ""}$${Math.abs(x).toLocaleString("en-AU", { maximumFractionDigits: 0 })}` : "n/a";
+  const price = (x) => fin(x) ? `$${x < 1 ? x.toFixed(3) : x.toFixed(2)}` : "n/a";
+  const fmtDate = (iso, opts = { day: "numeric", month: "short", year: "numeric" }) =>
+    iso ? new Date(iso + (iso.length === 10 ? "T00:00:00" : "")).toLocaleDateString("en-AU", opts) : "—";
+  function arrow(x) {
+    if (!fin(x) || x === 0) return null;
+    return el("span", { class: `arrow ${x > 0 ? "up" : "down"}`, "aria-hidden": "true", text: x > 0 ? "▲" : "▼" });
+  }
+
+  // ---------- theme toggle ----------
+  const root = document.documentElement;
+  try { const t = localStorage.getItem("theme"); if (t) root.dataset.theme = t; } catch (e) {}
+  $("theme-btn").addEventListener("click", () => {
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
+    if (DATA) render(DATA);
+  });
+
+  // ---------- generic line chart (one y-axis, crosshair tooltip) ----------
+  function lineChart(host, o) {
+    host.replaceChildren();
+    const W = Math.max(280, host.clientWidth || 600), H = o.height;
+    const m = { t: 10, r: o.endLabels ? 64 : 12, b: 22, l: o.yWidth || 44 };
+    const n = o.dates.length;
+    const vals = [];
+    o.series.forEach((sr) => sr.values.forEach((v) => fin(v) && vals.push(v)));
+    if (o.band) [o.band.lo, o.band.hi].forEach((a) => a.forEach((v) => fin(v) && vals.push(v)));
+    if (fin(o.baseline)) vals.push(o.baseline);
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.05 || 1; lo -= pad; hi += pad;
+    const x = (i) => m.l + (n <= 1 ? 0 : (i / (n - 1)) * (W - m.l - m.r));
+    const y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * (H - m.t - m.b);
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": o.label });
+
+    // grid + y ticks: 4 clean steps
+    const step = niceStep((hi - lo) / 4);
+    for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+      svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: css("--grid"), "stroke-width": 1 }));
+      const t = s("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }); t.textContent = o.yfmt(v); svg.append(t);
+    }
+    if (fin(o.baseline)) svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y(o.baseline), y2: y(o.baseline), stroke: css("--axis"), "stroke-width": 1 }));
+    // x ticks: up to 5 evenly spaced dates
+    const xt = Math.min(5, n);
+    for (let k = 0; k < xt; k++) {
+      const i = Math.round((k / Math.max(1, xt - 1)) * (n - 1));
+      const t = s("text", { x: x(i), y: H - 4, "text-anchor": k === 0 ? "start" : k === xt - 1 ? "end" : "middle" });
+      t.textContent = fmtDate(o.dates[i], { day: "numeric", month: "short" }); svg.append(t);
+    }
+    if (fin(o.split)) svg.append(s("line", { x1: x(o.split), x2: x(o.split), y1: m.t, y2: H - m.b, stroke: css("--axis"), "stroke-width": 1 }));
+
+    if (o.band) {
+      let top = "", bot = "";
+      o.band.lo.forEach((v, i) => { if (fin(v) && fin(o.band.hi[i])) { top += `${top ? "L" : "M"}${x(i)},${y(o.band.hi[i])}`; bot = `L${x(i)},${y(v)}` + bot; } });
+      if (top) svg.append(s("path", { d: top + bot + "Z", fill: o.band.color, stroke: "none" }));
+    }
+    o.series.forEach((sr) => {
+      let d = "", pen = false;
+      sr.values.forEach((v, i) => { if (fin(v)) { d += `${pen ? "L" : "M"}${x(i)},${y(v)}`; pen = true; } else pen = false; });
+      svg.append(s("path", { d, fill: "none", stroke: sr.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+      const li = lastIdx(sr.values);
+      if (li >= 0 && sr.endDot !== false) svg.append(s("circle", { cx: x(li), cy: y(sr.values[li]), r: 4, fill: sr.color, stroke: css("--surface"), "stroke-width": 2 }));
+    });
+    if (o.endLabels) placeEndLabels(svg, o.series, x, y, W - m.r + 8, o.yfmt);
+
+    // crosshair
+    const cross = s("line", { y1: m.t, y2: H - m.b, stroke: css("--axis"), "stroke-width": 1, visibility: "hidden" });
+    const hit = s("rect", { x: m.l, y: 0, width: W - m.l - m.r, height: H, fill: "transparent", tabindex: 0 });
+    svg.append(cross, hit);
+    host.append(svg);
+    const tip = el("div", { class: "tip", hidden: "" }); host.append(tip);
+    const show = (i) => {
+      cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+      const rows = [el("div", { class: "t-date", text: fmtDate(o.dates[i], { weekday: "short", day: "numeric", month: "short", year: "numeric" }) })];
+      o.series.forEach((sr) => fin(sr.values[i]) && rows.push(row(sr.label, o.yfmt(sr.values[i]), sr.color)));
+      if (o.band && fin(o.band.lo[i]) && o.band.tipLabel) rows.push(row(o.band.tipLabel, `${o.yfmt(o.band.lo[i])} – ${o.yfmt(o.band.hi[i])}`, null));
+      tip.replaceChildren(...rows); tip.hidden = false;
+      const left = x(i) * host.clientWidth / W;
+      tip.style.left = `${Math.min(Math.max(0, left + 12), host.clientWidth - tip.offsetWidth)}px`;
+      tip.style.top = "4px";
+    };
+    const hide = () => { cross.setAttribute("visibility", "hidden"); tip.hidden = true; };
+    let cur = n - 1;
+    hit.addEventListener("pointermove", (e) => {
+      const r = svg.getBoundingClientRect();
+      const px = (e.clientX - r.left) * W / r.width;
+      cur = Math.max(0, Math.min(n - 1, Math.round(((px - m.l) / (W - m.l - m.r)) * (n - 1)))); show(cur);
+    });
+    hit.addEventListener("pointerleave", hide);
+    hit.addEventListener("focus", () => show(cur));
+    hit.addEventListener("blur", hide);
+    hit.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft") { cur = Math.max(0, cur - 1); show(cur); e.preventDefault(); }
+      if (e.key === "ArrowRight") { cur = Math.min(n - 1, cur + 1); show(cur); e.preventDefault(); }
+    });
+  }
+  function row(label, value, color) {
+    const key = el("span", {}, [color ? el("i", { style: `display:inline-block;width:12px;height:2px;border-radius:2px;background:${color}` }) : null, label]);
+    return el("div", { class: "row" }, [key, el("b", { text: value })]);
+  }
+  function lastIdx(a) { for (let i = a.length - 1; i >= 0; i--) if (fin(a[i])) return i; return -1; }
+  function niceStep(raw) {
+    const p = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+    const f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+  }
+  function placeEndLabels(svg, series, x, y, lx, fmt) {
+    // nudge colliding labels apart with a leader line back to the line end
+    const items = series.map((sr) => { const i = lastIdx(sr.values); return i < 0 ? null : { sr, i, y0: y(sr.values[i]), y: y(sr.values[i]) }; }).filter(Boolean)
+      .sort((a, b) => a.y - b.y);
+    for (let k = 1; k < items.length; k++) if (items[k].y - items[k - 1].y < 14) items[k].y = items[k - 1].y + 14;
+    items.forEach((it) => {
+      if (Math.abs(it.y - it.y0) > 2) svg.append(s("line", { x1: x(it.i) + 5, y1: it.y0, x2: lx - 2, y2: it.y, stroke: css("--axis"), "stroke-width": 1 }));
+      const t = s("text", { x: lx, y: it.y + 4, class: "end-label" }); t.textContent = fmt(it.sr.values[it.i]); svg.append(t);
+    });
+  }
+
+  // ---------- sections ----------
+  function renderHeader(d) {
+    const age = (Date.now() - new Date(d.data_date + "T18:00:00+10:00")) / 864e5;
+    const pill = $("data-pill");
+    pill.classList.remove("fresh", "stale");
+    pill.classList.add(age <= 4 ? "fresh" : "stale");
+    $("data-date").textContent = `Prices to ${fmtDate(d.data_date)}${age > 4 ? " · stale" : ""}`;
+    $("universe-pill").textContent = `${d.universe_size} of ${d.symbols_loaded} stocks pass the screen`;
+    $("foot-gen").textContent = `Generated ${new Date(d.generated_at).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" })} · model + backtests ran in ${Math.round(d.runtime_seconds.model_and_backtests / 60)} min`;
+    const b = $("banner");
+    if (d.demo) { b.hidden = false; b.textContent = "Demo data: these numbers come from synthetic prices and an untrained model, only to show the layout. The live site shows real results after the first daily run."; }
+    else if (age > 4) { b.hidden = false; b.textContent = "These picks are more than four days old. The daily update may have failed; check the Actions tab on GitHub."; }
+    else b.hidden = true;
+  }
+
+  function renderPicks(d) {
+    const st = d.settings, box = $("tickets");
+    $("picks-sub").textContent = `Buy at the open, sell at the close ${st.hold} sessions later. Sized for $${st.capital.toLocaleString("en-AU")} capital with ${Math.round(st.min_cash_buffer * 100)}% kept in cash.`;
+    box.replaceChildren();
+    if (!d.recommendations.length) {
+      box.append(el("div", { class: "empty-picks", text: "No stock has a forecast gain larger than trading costs today. The model's call is to stay in cash." }));
+      return;
+    }
+    d.recommendations.forEach((p, k) => {
+      const chart = el("div", { class: "chart" });
+      const card = el("article", { class: "ticket" }, [
+        el("div", { class: "t-top" }, [
+          el("div", { style: "min-width:0" }, [
+            el("div", { class: "t-rank", text: `#${k + 1} · ${p.industry || "ASX"}` }),
+            el("div", { class: "t-sym", text: p.symbol, style: "margin-top:6px" }),
+            el("div", { class: "t-name", text: p.name || "" }),
+          ]),
+          el("div", { class: "t-fc" }, [
+            el("div", { class: "big", text: pct(p.expected) }),
+            el("div", { class: "lbl", text: `median forecast, ${st.hold} sessions` }),
+          ]),
+        ]),
+        chart,
+        el("div", { class: "mini-legend" }, [
+          el("span", { class: "key" }, [el("i", { style: `background:${css("--hist")}` }), "Close"]),
+          el("span", { class: "key" }, [el("i", { style: `background:${css("--accent")}` }), "Forecast median"]),
+          el("span", { class: "key" }, [el("i", { class: "band", style: `background:${css("--accent-wash")}` }), "10–90% range"]),
+        ]),
+        el("dl", { class: "kv" }, [
+          kv("Last close", price(p.price)),
+          kv("10–90% range", `${pct(p.q10, 0)} to ${pct(p.q90, 0)}`),
+          kv("Score", fin(p.score) ? p.score.toFixed(2) : "n/a"),
+          kv("Buy qty", p.qty.toLocaleString("en-AU")),
+          kv("Spend", money(p.spend)),
+          kv("Fees", money(2 * st.trade_cost)),
+        ]),
+      ]);
+      box.append(card);
+      const h = p.history, f = p.forecast;
+      const dates = h.dates.slice(-60).concat(f.dates);
+      const hist = h.close.slice(-60);
+      const pad = Array(f.dates.length).fill(null);
+      const lastClose = hist[hist.length - 1];
+      const lead = Array(hist.length - 1).fill(null);
+      requestAnimationFrame(() => lineChart(chart, {
+        label: `${p.symbol}: last 60 closes and ${st.hold}-session TimesFM forecast`,
+        height: 150, yWidth: 48, dates, split: hist.length - 1,
+        yfmt: (v) => v < 1 ? v.toFixed(3) : v.toFixed(2),
+        series: [
+          { label: "Close", color: css("--hist"), values: hist.concat(pad), endDot: false },
+          { label: "Forecast", color: css("--accent"), values: lead.concat([lastClose], f.median) },
+        ],
+        band: { lo: lead.concat([lastClose], f.q10), hi: lead.concat([lastClose], f.q90), color: css("--accent-wash"), tipLabel: "Range" },
+      }));
+    });
+  }
+  function kv(k, v) { return el("div", {}, [el("dt", { text: k }), el("dd", { text: v })]); }
+
+  const SERIES = [
+    { key: "timesfm", label: "TimesFM strategy", color: "--s1" },
+    { key: "benchmark", label: "Index", color: "--s2" },
+    { key: "universe", label: "All screened stocks (equal weight)", color: "--s3" },
+    { key: "momentum", label: "Momentum baseline", color: "--s4" },
+  ];
+  function renderPerf(d) {
+    const bt = d.backtest, st = d.settings, t = bt.timesfm;
+    const strat = t.strategy, bench = t.benchmark, uni = t.universe_equal_weight, mom = bt.momentum.strategy;
+    $("perf-sub").textContent = `${fmtDate(bt.start)} to ${fmtDate(bt.end)} · top ${st.top}, ${st.hold}-session holds · $${st.trade_cost} per order + ${st.slippage_bps / 100}% slippage each side.`;
+    const k = $("kpis"); k.replaceChildren();
+    const vs = (other, name) => {
+      if (!other || !fin(other.total_return)) return el("span", { text: `${name} unavailable` });
+      const diff = strat.total_return - other.total_return;
+      return el("span", {}, [arrow(diff), ` ${diff >= 0 ? "+" : "−"}${Math.abs(diff * 100).toFixed(1)} pts vs ${name}`]);
+    };
+    k.append(
+      tile("TimesFM strategy return", pct(strat.total_return, 1), vs(bench, `index (${st.benchmark})`), true),
+      tile(`Index ${st.benchmark}`, bench ? pct(bench.total_return, 1) : "n/a", el("span", { text: "Buy and hold, same dates" })),
+      tile("All screened stocks", pct(uni.total_return, 1), el("span", { text: "Equal weight, no costs" })),
+      tile("Momentum baseline", pct(mom.total_return, 1), el("span", { text: "20-day winners, same costs" })),
+      tile("Sharpe ratio", fin(strat.sharpe) ? strat.sharpe.toFixed(2) : "n/a", el("span", { text: bench && fin(bench.sharpe) ? `Index ${bench.sharpe.toFixed(2)}` : "Annualised" })),
+      tile("Worst drawdown", pct(strat.max_drawdown, 1), el("span", { text: bench ? `Index ${pct(bench.max_drawdown, 1)}` : "Peak to trough" })),
+      tile("Winning trades", fin(t.hit_rate) ? `${Math.round(t.hit_rate * 100)}%` : "n/a", el("span", { text: `of ${t.trades_count} trades` })),
+      tile("Average trade", pct(t.avg_trade_return), el("span", { text: "Before brokerage" })),
+    );
+
+    const c = bt.curves, avail = SERIES.filter((sr) => c[sr.key]).map((sr) => sr.key === "benchmark" ? { ...sr, label: `Index ${st.benchmark}` } : sr);
+    const legend = $("eq-legend"); legend.replaceChildren(...avail.map((sr) =>
+      el("span", { class: "key" }, [el("i", { style: `background:${css(sr.color)}` }), sr.label])));
+    lineChart($("eq-chart"), {
+      label: "Growth of $100 for the TimesFM strategy, index, screened universe and momentum baseline",
+      height: 300, dates: c.dates, baseline: 100, endLabels: true, yfmt: (v) => v.toFixed(0),
+      series: avail.map((sr) => ({ label: sr.label, color: css(sr.color), values: c[sr.key].slice(0, c.dates.length) })),
+    });
+    const tbl = el("table", {}, [
+      el("thead", {}, el("tr", {}, [el("th", { text: "Date" }), ...avail.map((sr) => el("th", { class: "r", text: sr.label }))])),
+      el("tbody", {}, c.dates.map((dt, i) => el("tr", {}, [el("td", { class: "num", text: dt }),
+        ...avail.map((sr) => el("td", { class: "num r", text: fin(c[sr.key][i]) ? c[sr.key][i].toFixed(1) : "n/a" }))]))),
+    ]);
+    $("eq-table").replaceChildren(tbl);
+  }
+  function tile(label, value, delta, hero) {
+    return el("div", { class: `kpi${hero ? " hero" : ""}` }, [el("span", { class: "eyebrow", text: label }), el("span", { class: "v", text: value }), el("span", { class: "d" }, delta)]);
+  }
+
+  function renderTrades(d) {
+    const rows = d.backtest.recent_trades;
+    if (!rows.length) { $("trades").replaceChildren(el("p", { style: "padding:16px", class: "sub", text: "No trades in the backtest window." })); return; }
+    const head = ["Signal", "Exit", "Stock", "Forecast", "Actual", "P&L"];
+    $("trades").replaceChildren(el("table", {}, [
+      el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { class: i > 2 ? "r" : "", text: h })))),
+      el("tbody", {}, rows.map((t) => el("tr", {}, [
+        el("td", { class: "num", text: t.signal_date }), el("td", { class: "num", text: t.exit_date }),
+        el("td", { class: "mono", text: t.symbol }),
+        el("td", { class: "num r", text: pct(t.expected) }),
+        el("td", { class: "num r" }, [arrow(t.return), ` ${pct(t.return)}`]),
+        el("td", { class: "num r", text: money(t.pnl) }),
+      ]))),
+    ]));
+  }
+
+  function renderSettings(d) {
+    const st = d.settings, f = st.filters;
+    const items = [
+      ["Model", `TimesFM 2.5 · ${st.context}-day context`],
+      ["Ranking", st.rank === "sharpe" ? "Forecast return ÷ forecast range" : "Forecast return"],
+      ["Positions", `${st.top} stocks, equal dollars`],
+      ["Holding period", `${st.hold} sessions`],
+      ["Capital", `$${st.capital.toLocaleString("en-AU")} (${Math.round(st.min_cash_buffer * 100)}% cash buffer)`],
+      ["Brokerage", `$${st.trade_cost} per order`],
+      ["Slippage", `${st.slippage_bps} bps each side`],
+      ["Screen", `${f.min_trading_days}+ sessions, ≥ $${f.min_price}, ≥ $${(f.min_avg_dollar_volume / 1e3).toFixed(0)}k/day`],
+      ["Benchmark", st.benchmark],
+    ];
+    $("settings").replaceChildren(...items.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]));
+  }
+
+  const CMDS = [
+    ["Install (Python 3.10+)", "pip install -r requirements.txt"],
+    ["Download prices", "python stocktrade.py ingest"],
+    ["Tomorrow's picks", "python stocktrade.py tfm-recommend --capital 5000"],
+    ["Backtest any window", "python stocktrade.py tfm-backtest --start-date 2025-01-01 --top 5 --hold 5"],
+    ["Rebuild this page locally", "python stocktrade.py tfm-publish && python -m http.server -d docs"],
+  ];
+  function renderCmds() {
+    $("cmds").replaceChildren(...CMDS.map(([lbl, cmd], i) => {
+      const code = el("code", { id: `cmd-${i}`, text: cmd });
+      const btn = el("button", { class: "copy", type: "button", text: "Copy", "aria-label": `Copy: ${cmd}` });
+      btn.addEventListener("click", () => {
+        navigator.clipboard.writeText(cmd).then(() => { btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy", 1500); })
+          .catch(() => { const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); });
+      });
+      return el("div", { class: "cmd" }, [el("span", { class: "lbl", text: lbl }), el("div", { class: "code" }, [code, btn])]);
+    }));
+  }
+
+  $("eq-toggle").addEventListener("click", (e) => {
+    const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+    e.currentTarget.setAttribute("aria-pressed", String(on));
+    e.currentTarget.textContent = on ? "Show as chart" : "Show as table";
+    $("eq-chart").hidden = on; $("eq-legend").hidden = on; $("eq-table").hidden = !on;
+  });
+
+  let DATA = null;
+  function render(d) { renderHeader(d); renderPicks(d); renderPerf(d); renderTrades(d); renderSettings(d); }
+  renderCmds();
+  fetch("data/latest.json", { cache: "no-cache" })
+    .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+    .then((d) => { DATA = d; render(d); })
+    .catch(() => {
+      $("data-date").textContent = "No data yet";
+      const b = $("banner"); b.hidden = false;
+      b.textContent = "No forecast data has been published yet. The first daily run fills this page; run `python stocktrade.py tfm-publish` to build it locally.";
+      $("tickets").replaceChildren(el("div", { class: "empty-picks", text: "Picks appear here after the first daily run." }));
+    });
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => DATA && render(DATA), 150); });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+numpy
+pandas
+requests
+scikit-learn
+joblib
+pyyaml
+yfinance
+timesfm[torch]>=2.0

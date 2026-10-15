@@ -1,0 +1,19 @@
+# Copy to config.yaml to customise. Used automatically when config.yaml is missing.
+data:
+  eodhd_api_key: ""          # only needed for data_source: eodhd
+  base_path: data
+  symbols: all               # or a list, e.g. [BHP, CBA, CSL]
+  start_date: "2015-01-01"
+  data_source: yfinance
+  exchange: AU
+filters:                     # liquidity screen applied before forecasting
+  min_trading_days: 750
+  min_price: 0.25
+  min_avg_dollar_volume: 500000
+  avg_volume_window: 60
+risk:
+  min_cash_buffer: 0.15      # share of capital kept in cash
+backtest:
+  initial_capital: 10000     # brokerage is fixed per trade, so small accounts lose more to costs
+  trade_cost: 6.5            # $ per order (each buy and each sell)
+  slippage_bps: 10           # 0.10% price penalty per side
