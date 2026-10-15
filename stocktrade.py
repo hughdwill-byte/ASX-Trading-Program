@@ -956,11 +956,15 @@ class DataIngestor:
         return self._normalise_yfinance(df, symbol)
 
     def _download_yfinance_batch(self, symbols: List[str], chunk: int = 200) -> Dict[str, pd.DataFrame]:
-        """Download many tickers per request (threaded inside yfinance); far faster than one at a time."""
+        """Download many tickers per request (threaded inside yfinance); far faster than one at a time.
+
+        Yahoo rate-limits large batches (HTTP 429), which comes back as empty frames rather than errors,
+        so empty results are retried in smaller, unthreaded batches before a symbol is treated as dead.
+        """
         suffix = self.config.yfinance_suffix or ""
         frames: Dict[str, pd.DataFrame] = {}
-        for start in range(0, len(symbols), chunk):
-            batch = symbols[start : start + chunk]
+
+        def fetch(batch: List[str], threads: bool) -> None:
             tickers = [sym if sym.endswith(suffix) else f"{sym}{suffix}" for sym in batch]
             try:
                 raw = yf.download(
@@ -969,18 +973,32 @@ class DataIngestor:
                     end=self.config.end_date,
                     auto_adjust=False,
                     progress=False,
-                    threads=True,
+                    threads=threads,
                     group_by="ticker",
                 )
             except Exception as err:  # pragma: no cover - network dependent
-                logging.warning("Batch download failed (%s); falling back to per-symbol fetches.", err)
-                continue
+                logging.warning("Batch download failed (%s).", err)
+                return
             if isinstance(raw.columns, pd.MultiIndex):
                 available = set(raw.columns.get_level_values(0))
                 for sym, ticker in zip(batch, tickers):
                     if ticker in available:
-                        frames[sym] = self._normalise_yfinance(raw[ticker].dropna(how="all"), sym)
+                        df = self._normalise_yfinance(raw[ticker].dropna(how="all"), sym)
+                        if not df.empty or sym not in frames:
+                            frames[sym] = df
+
+        for start in range(0, len(symbols), chunk):
+            fetch(symbols[start : start + chunk], threads=True)
             logging.info("Downloaded %s/%s symbols.", min(start + chunk, len(symbols)), len(symbols))
+        for attempt, size in enumerate((40, 10), start=1):
+            empty = [sym for sym in symbols if frames.get(sym) is None or frames[sym].empty]
+            if not empty:
+                break
+            logging.info("Retry %s: %s symbols came back empty; retrying in batches of %s.", attempt, len(empty), size)
+            time.sleep(5 * attempt)
+            for start in range(0, len(empty), size):
+                fetch(empty[start : start + size], threads=False)
+                time.sleep(1)
         return frames
 
     @staticmethod

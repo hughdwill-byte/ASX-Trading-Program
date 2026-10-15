@@ -64,6 +64,12 @@ def build_context(orchestrator, cfg: dict) -> Context:
     symbols = list(dict.fromkeys(list(symbols) + [core, "A200"]))
     t0 = time.monotonic()
     panel = load_panel(orchestrator.ingestor, symbols)
+    if core not in panel["adj_close"].columns:  # the benchmark must exist; fetch it directly if a batch dropped it
+        orchestrator.ingestor.exclusions.pop(core, None)
+        orchestrator.ingestor.fetch_ohlcv(core, refresh=True)
+        panel = load_panel(orchestrator.ingestor, symbols)
+    if core not in panel["adj_close"].columns:
+        raise ValueError(f"Benchmark ETF {core} could not be downloaded; cannot run strategy research.")
     aord = load_benchmark("^AORD", config.data.base_path, config.data.start_date)
     asic_dir = project_path(str(config.data.base_path), "asic_short")
     si = None

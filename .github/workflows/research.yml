@@ -37,7 +37,7 @@ jobs:
           pip install -r requirements.txt
       # Caches persist between runs (GitHub Actions cache, 7-day eviction if unused; the monthly run refreshes them).
       - name: Restore TimesFM weights, monthly forecast cache and ASIC reports
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cache/huggingface
@@ -61,6 +61,15 @@ jobs:
         continue-on-error: true  # resumable; the next run finishes it
         timeout-minutes: 120
         run: time python stocktrade.py tfm-cache --transform raw
+      - name: Save caches (even if a later step fails, so slow downloads are not repeated)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            data/tfm_cache
+            data/asic_short
+          key: research-${{ github.run_id }}
       - name: Strategy grid, walk-forward and validation
         run: time python stocktrade.py strat-backtest
       - uses: actions/upload-artifact@v4
