@@ -44,7 +44,7 @@ Forecaster = Callable[[List[np.ndarray]], Tuple[np.ndarray, np.ndarray, np.ndarr
 
 
 def load_timesfm(
-    checkpoint: str = DEFAULT_CHECKPOINT, context: int = 512, batch_size: int = 64
+    checkpoint: str = DEFAULT_CHECKPOINT, context: int = 512, batch_size: int = 64, positive: bool = True
 ) -> Forecaster:
     """Load TimesFM 2.5 from a Hugging Face repo id or a local directory holding model.safetensors."""
     import timesfm
@@ -61,7 +61,7 @@ def load_timesfm(
             per_core_batch_size=batch_size,
             use_continuous_quantile_head=True,
             force_flip_invariance=True,
-            infer_is_positive=True,
+            infer_is_positive=positive,  # False for log-relative series, which can be negative
             fix_quantile_crossing=True,
         )
     )

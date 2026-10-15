@@ -20,6 +20,22 @@ and a cost-inclusive six-month backtest against the All Ordinaries. The `Daily p
 Action rebuilds it every weekday at 5:17pm AEST (`.github/workflows/pages.yml`); run it on demand from
 the Actions tab. One-time setup: **Settings → Pages → Source: GitHub Actions**.
 
+## Strategy research (monthly)
+
+The dashboard's recommendation comes from `strat-backtest`: 22 cost-aware monthly strategy variants
+(risk-adjusted momentum, low volatility, a blend, two TimesFM signals; 5 or 8 positions; optional
+All Ords trend filter) tested from 2016 against VAS.AX (total return), with walk-forward selection,
+an untouched 2024-2026 hold-out, deflated Sharpe ratio and probability of backtest overfitting.
+A strategy is recommended only if it passes all nine acceptance tests; otherwise the page says to hold
+the index ETF. The `Strategy research` workflow runs it monthly (or from the Actions tab) and commits
+`results/`. Design notes and deviations: `NOTES_strategy_v2.md`.
+
+```bash
+python stocktrade.py strat-backtest      # grid + validation -> results/
+python stocktrade.py strat-recommend     # today's tier and next-open orders
+python stocktrade.py strat-publish       # merge into docs/data/latest.json
+```
+
 ## Quick start
 
 ```bash

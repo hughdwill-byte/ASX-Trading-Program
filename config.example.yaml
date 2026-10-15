@@ -17,3 +17,36 @@ backtest:
   initial_capital: 10000     # brokerage is fixed per trade, so small accounts lose more to costs
   trade_cost: 6.5            # $ per order (each buy and each sell)
   slippage_bps: 10           # 0.10% price penalty per side
+strategy:                    # monthly cost-aware strategy (strat-* commands); see NOTES_strategy_v2.md
+  capital: 10000             # account size used for sizing and for picking the validation setting
+  core_weight: 0.0           # share held in the core ETF; the rest is the stock satellite
+  core_ticker: VAS.AX        # core ETF and total-return benchmark (VAS tracks the ASX 300)
+  signal: RAMOM              # default signal for reference; the live variant comes from results/frozen_choice.json
+  n_positions: 5             # satellite slots (capped by capital / min_position)
+  buffer_mult: 3             # keep a holding until its rank falls below buffer_mult x N
+  min_position: 2500         # smallest position; fewer than 3 slots disables the satellite
+  min_order: 1000            # skip any order smaller than this
+  regime_filter: true        # move the satellite to the core ETF when ^AORD is below its 200-day average
+  regime_band: 0.02          # +/- band around the 200-day average before the regime flips
+  regime_sma: 200            # trend filter length in trading days
+  si_screen: false           # skip names with ASIC short interest above si_max
+  si_max: 0.05               # 5% of shares on issue reported short
+  asic_lag_days: 4           # business days before an ASIC report is treated as known
+  brokerage: 6.50            # $ per order
+  slippage_tiers: {high: 0.0010, mid: 0.0025, low: 0.0050, etf: 0.0005}  # per side, by MDV60 tier
+  slippage_mdv_high: 10000000  # MDV60 at or above this uses the high-liquidity tier
+  slippage_mdv_mid: 2000000    # MDV60 at or above this uses the mid tier
+  cost_stress_mult: 2.0      # slippage multiplier for the cost-stress test
+  stale_days: 10             # exit a holding with no price for this many trading days
+  stale_haircut: 0.30        # exit stale holdings at last close x (1 - haircut)
+  cash_rate_annual: 0.0      # interest on idle cash (not modelled)
+  core_drift_band: 0.10      # rebalance core vs satellite each July only beyond this drift
+  universe_size: 250         # top N by 60-day median dollar turnover
+  min_history_days: 300      # valid price days required
+  min_presence: 0.95         # share of the last 252 sessions with a price
+  min_price: 1.00            # minimum unadjusted close
+  min_mdv60: 2000000         # minimum 60-day median dollar turnover
+  max_zero_volume_days: 2    # in the last 20 sessions
+  max_daily_move: 2.0        # reject series with a >200% one-day move in the last year (bad data)
+  exclude_tickers: [STW, SFY, A200, VAS]  # ETFs found in the symbol list (from the ASX company directory)
+  start: "2016-03-31"        # first decision date

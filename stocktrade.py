@@ -2231,11 +2231,14 @@ class TradingOrchestrator:
                 len(symbols),
                 exchange_code,
             )
+        # Index ETFs for the total-return benchmark (VAS.AX) and the cheapest All Ords proxy (A200.AX).
+        symbols = list(dict.fromkeys(list(symbols or []) + ["VAS", "A200"])) if symbols else symbols
         if not symbols:
             cached_list = project_path("available_symbols.json")
             if cached_list.exists():
                 symbols = json.loads(cached_list.read_text(encoding="utf-8"))
                 logging.info("Symbol directory unavailable; using %s symbols from %s.", len(symbols), cached_list.name)
+                symbols = list(dict.fromkeys(symbols + ["VAS", "A200"]))
         data = self.ingestor.ingest_all(symbols=symbols)
         logging.info("Ingestion finished.")
         return data
@@ -3467,6 +3470,10 @@ def build_parser() -> argparse.ArgumentParser:
     tfm_publish.add_argument("--out", default="docs/data/latest.json", help="Output JSON path.")
     add_cli_args(tfm_publish)
 
+    from ml.strategy_cli import add_cli_args as add_strategy_args
+
+    add_strategy_args(subparsers)
+
     return parser
 
 
@@ -3605,6 +3612,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 print(highlight_text(line, bool(item.get("is_asx200"))))
             print(f"\nCapital used: {result['capital'] - result['remaining_capital']:.2f}")
             print(f"Capital remaining: {result['remaining_capital']:.2f}")
+    elif args.command in {"strat-backtest", "strat-recommend", "strat-publish", "tfm-cache", "asic-download"}:
+        from ml.strategy_cli import run_cli as run_strategy_cli
+
+        orchestrator.config_path = config_path
+        return run_strategy_cli(args, orchestrator)
     elif args.command in {"tfm-backtest", "tfm-recommend", "tfm-publish"}:
         from ml.timesfm_strategy import run_cli
 
