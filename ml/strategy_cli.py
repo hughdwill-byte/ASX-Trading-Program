@@ -245,10 +245,31 @@ def strat_backtest(ctx: Context, cfg: dict, args) -> int:
                     if row["period"] == "walk_forward"]
 
     _write_compare(compare)
+    _write_history(per_setting, aord_m, ew_m)
     (RESULTS / "validation.json").write_text(json.dumps(sanitize_for_json(validation), indent=1))
     logger.info("strat-backtest finished in %.1f min", (time.time() - run_start) / 60)
     _print_summary(compare, validation, cfg)
     return 0
+
+
+def _write_history(per_setting: Dict[str, dict], aord_m: pd.Series, ew_m: pd.Series) -> None:
+    """Month-by-month net returns and holdings for every variant, so the dashboard can replay any start date."""
+    out = {"note": "Monthly net returns after brokerage and slippage; holdings are what each strategy held "
+                   "during the month ending on that date.", "settings": {}}
+    for setting, data in per_setting.items():
+        dates = data["bench_m"].index
+        ser = lambda m: [round(float(x), 6) if pd.notna(x) else None for x in m.reindex(dates)]
+        strategies = {}
+        for vid, r in data["results"].items():
+            held = r["books"].shift(1).reindex(dates)  # decided at the previous month-end, held through this month
+            strategies[vid] = {"returns": ser(r["monthly"]),
+                               "holdings": [h if isinstance(h, str) else "" for h in held]}
+        out["settings"][setting] = {
+            "dates": [d.date().isoformat() for d in dates],
+            "baselines": {"BENCH_TR": ser(data["bench_m"]), "AORD_PRICE": ser(aord_m), "EW_UNIV": ser(ew_m)},
+            "strategies": strategies,
+        }
+    (RESULTS / "history.json").write_text(json.dumps(out, separators=(",", ":")))
 
 
 def _variant_fields(v: Variant) -> dict:
@@ -491,6 +512,7 @@ def strat_publish(cfg: dict, results_dir: pathlib.Path = RESULTS, out: Optional[
                                                          "walk_forward_picks", "survivorship", "stress_windows")}
                                for s, v in setting_status.items()},
         "signal_ic": validation.get("ic"),
+        "history": json.loads((RESULTS / "history.json").read_text()) if (RESULTS / "history.json").exists() else None,
         "data_flags": {
             "asic_stale": not bool((validation.get("asic_coverage") or {}).get("complete")),
             "survivorship_note": "Backtests use today's listings only; delisted companies are missing, so results are biased upward.",

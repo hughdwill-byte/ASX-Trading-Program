@@ -63,6 +63,7 @@ body {
   padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
 .wrap { max-width: 1160px; margin: 0 auto; padding-block: 20px 64px; display: grid; gap: 40px; }
+.wrap > * { min-width: 0; }
 h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
 h1 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); line-height: 1.1; }
 h2 { font-size: 1.35rem; }
@@ -88,7 +89,7 @@ button { font: inherit; color: inherit; }
 .banner { padding: 12px 16px; border-radius: var(--r); background: var(--sunk); border-left: 4px solid var(--warn); }
 
 /* Section heads */
-.sec { display: grid; gap: 18px; }
+.sec { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
 .sec-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; justify-content: space-between; }
 .sec-head p { font-size: 0.92rem; }
 
@@ -150,8 +151,8 @@ button { font: inherit; color: inherit; }
 details summary { cursor: pointer; color: var(--ink-2); font-size: 0.9rem; }
 details[open] summary { margin-bottom: 8px; }
 .filters { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 0.86rem; color: var(--ink-2); }
-.filters label { display: inline-flex; gap: 8px; align-items: center; }
-.filters select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.filters label { display: inline-flex; gap: 8px; align-items: center; min-width: 0; max-width: 100%; }
+.filters select { min-width: 0; max-width: 100%; text-overflow: ellipsis; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--ink); }
 th[aria-sort="descending"]::after { content: " ↓"; } th[aria-sort="ascending"]::after { content: " ↑"; }
@@ -243,6 +244,30 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
     <div class="tbl-wrap" id="cmp-table"></div>
     <p class="sub small">Net of A$6.50 brokerage and tiered slippage. Click a column to sort. <span class="pass-key">Highlighted</span> = passes all nine acceptance tests. Grey = not run (reason shown). Excess return is annualised vs VAS.AX with a 90% bootstrap interval.</p>
     <div class="two-col" id="val-box"></div>
+  </section>
+
+  <section class="sec" id="hist-sec" aria-labelledby="hist-h" hidden>
+    <div class="sec-head">
+      <h2 id="hist-h">How it would have done</h2>
+      <p class="sub">Replay any strategy from the year you choose. Net of brokerage and slippage; VAS includes dividends.</p>
+    </div>
+    <div class="filters">
+      <label>Capital <select id="h-setting"></select></label>
+      <label>Strategy <select id="h-strat"></select></label>
+      <label>Starting <select id="h-start"></select></label>
+    </div>
+    <div class="kpis" id="h-kpis"></div>
+    <div class="card">
+      <div class="legend" id="h-legend"></div>
+      <div class="chart" id="h-chart"></div>
+    </div>
+    <h3>Year by year</h3>
+    <div class="tbl-wrap" id="h-years"></div>
+    <details id="h-months-box">
+      <summary>What it held each month</summary>
+      <div class="tbl-wrap" id="h-months"></div>
+    </details>
+    <p class="sub small">Backtest on today's listed companies only: firms that later collapsed or delisted are missing, so these results are better than real trading would have been.</p>
   </section>
 
   <section class="sec" aria-labelledby="picks-h">
@@ -672,7 +697,7 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
       const cls = [skipped ? "skip" : "", allPass ? "pass" : "", BASE_LABELS[r.id] ? "base" : ""].join(" ").trim();
       const cells = CMP_COLS.map(([key, , fmt], i) => {
         if (key === "id") {
-          const name = el("td", { text: BASE_LABELS[r.id] || r.id });
+          const name = el("td", { text: BASE_LABELS[r.id] || strategyLabel(r.id), title: r.id });
           if (r.is_frozen) name.append(el("span", { class: "badge", text: "SELECTED" }));
           return name;
         }
@@ -723,6 +748,121 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
     }
   }
 
+  // ---------- historical replay ----------
+  const SIGNAL_NAMES = { RAMOM: "Risk-adjusted momentum", COMBO: "Momentum + low-vol blend", LOWVOL: "Low volatility",
+    TFM_REL: "TimesFM (vs index)", TFM_RAW: "TimesFM (price)" };
+  function strategyLabel(id) {
+    const m = /^([A-Z_]+?)_N(\d+)_(reg|noreg)_B(\d+)(_SI)?/.exec(id || "");
+    if (!m) return id;
+    const parts = [SIGNAL_NAMES[m[1]] || m[1], `${m[2]} stocks`, m[3] === "reg" ? "trend filter" : "no trend filter"];
+    if (m[4] === "1") parts.push("no hold buffer");
+    if (m[5]) parts.push("short-interest screen");
+    return parts.join(" · ");
+  }
+  const settingLabel = (s) => { const [cap, core] = s.split("_core"); return `A$${Number(cap).toLocaleString("en-AU")}${Number(core) ? `, ${Math.round(core * 100)}% core ETF` : ", all stocks"}`; };
+  const HIST_SERIES = [
+    { key: "strategy", label: "Strategy", color: "--s1" },
+    { key: "BENCH_TR", label: "VAS (All Ords proxy, with dividends)", color: "--s2" },
+    { key: "EW_UNIV", label: "All screened stocks (equal weight)", color: "--s3" },
+    { key: "AORD_PRICE", label: "^AORD price index (no dividends)", color: "--s4" },
+  ];
+  let histInit = false;
+  function renderHistory(d) {
+    const h = d.history;
+    $("hist-sec").hidden = !h || !h.settings;
+    if (!h || !h.settings) return;
+    const selSet = $("h-setting"), selStrat = $("h-strat"), selStart = $("h-start");
+    const fillStrategies = () => {
+      const st = h.settings[selSet.value];
+      const frozen = (((d.validation_summary || {})[selSet.value] || {}).frozen || {}).variant;
+      const ids = Object.keys(st.strategies).sort((a, b) => strategyLabel(a).localeCompare(strategyLabel(b)));
+      selStrat.replaceChildren(...ids.map((id) => el("option", { value: id, text: (id === frozen ? "★ " : "") + strategyLabel(id) })));
+      if (frozen && ids.includes(frozen)) selStrat.value = frozen;
+      const years = [...new Set(st.dates.map((x) => x.slice(0, 4)))];
+      const keep = selStart.value;
+      selStart.replaceChildren(...years.map((y) => el("option", { value: y, text: y })));
+      if (years.includes(keep)) selStart.value = keep;
+    };
+    if (!histInit) {
+      histInit = true;
+      const settings = Object.keys(h.settings);
+      selSet.replaceChildren(...settings.map((x) => el("option", { value: x, text: settingLabel(x) })));
+      const want = d.recommendation && d.recommendation.setting;
+      if (want && settings.includes(want)) selSet.value = want;
+      fillStrategies();
+      selSet.addEventListener("change", () => { fillStrategies(); renderHistory(DATA); });
+      selStrat.addEventListener("change", () => renderHistory(DATA));
+      selStart.addEventListener("change", () => renderHistory(DATA));
+    }
+    const st = h.settings[selSet.value], strat = st.strategies[selStrat.value];
+    if (!strat) return;
+    const capital = Number(selSet.value.split("_core")[0]);
+    const i0 = Math.max(0, st.dates.findIndex((x) => x >= `${selStart.value}-01-01`));
+    const months = st.dates.slice(i0);
+    const rets = { strategy: strat.returns.slice(i0) };
+    for (const k of ["BENCH_TR", "EW_UNIV", "AORD_PRICE"]) rets[k] = (st.baselines[k] || []).slice(i0);
+    const grow = (r) => { let v = capital; return [capital, ...r.map((x) => (v *= 1 + (fin(x) ? x : 0)))]; };
+    const startDate = i0 > 0 ? st.dates[i0 - 1] : months[0];
+    const dates = [startDate, ...months];
+    const curves = Object.fromEntries(Object.entries(rets).map(([k, r]) => [k, grow(r)]));
+    const yrs = months.length / 12;
+    const cagr = (c) => Math.pow(c[c.length - 1] / capital, 1 / Math.max(yrs, 1 / 12)) - 1;
+    const mdd = (c) => { let peak = c[0], w = 0; for (const v of c) { peak = Math.max(peak, v); w = Math.min(w, v / peak - 1); } return w; };
+    const ahead = rets.strategy.filter((x, i) => fin(x) && fin(rets.BENCH_TR[i]) && x > rets.BENCH_TR[i]).length / Math.max(1, months.length);
+    const sEnd = curves.strategy.at(-1), bEnd = curves.BENCH_TR.at(-1);
+    $("h-kpis").replaceChildren(
+      tile(`A$${capital.toLocaleString("en-AU")} became`, money(sEnd), el("span", {}, [arrow(sEnd - bEnd), ` ${money(Math.abs(sEnd - bEnd))} ${sEnd >= bEnd ? "more" : "less"} than VAS (${money(bEnd)})`]), true),
+      tile("Yearly return", pct(cagr(curves.strategy), 1), el("span", { text: `VAS ${pct(cagr(curves.BENCH_TR), 1)}` })),
+      tile("Worst drop", pct(mdd(curves.strategy), 1), el("span", { text: `VAS ${pct(mdd(curves.BENCH_TR), 1)}` })),
+      tile("Months ahead of VAS", `${Math.round(ahead * 100)}%`, el("span", { text: `${months.length} months from ${fmtDate(startDate, { month: "short", year: "numeric" })}` })),
+    );
+    const series = HIST_SERIES.map((x) => ({ ...x, label: x.key === "strategy" ? strategyLabel(selStrat.value) : x.label }));
+    $("h-legend").replaceChildren(...series.map((x) => el("span", { class: "key" }, [el("i", { style: `background:${css(x.color)}` }), x.label])));
+    const kfmt = (v) => v >= 1e6 ? `$${(v / 1e6).toFixed(1)}m` : v >= 1e3 ? `$${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}k` : `$${v.toFixed(0)}`;
+    lineChart($("h-chart"), {
+      label: `Growth of A$${capital} for ${strategyLabel(selStrat.value)} vs VAS since ${startDate}`,
+      height: 320, dates, baseline: capital, endLabels: true, yWidth: 52, yfmt: kfmt,
+      series: series.map((x) => ({ label: x.label, color: css(x.color), values: curves[x.key] })),
+    });
+
+    // Year-by-year
+    const byYear = {};
+    months.forEach((m, i) => {
+      const y = m.slice(0, 4);
+      const row = byYear[y] || (byYear[y] = { n: 0, s: 1, b: 1, a: 1, last: m });
+      row.n++; row.last = m;
+      row.s *= 1 + (fin(rets.strategy[i]) ? rets.strategy[i] : 0);
+      row.b *= 1 + (fin(rets.BENCH_TR[i]) ? rets.BENCH_TR[i] : 0);
+      row.a *= 1 + (fin(rets.AORD_PRICE[i]) ? rets.AORD_PRICE[i] : 0);
+    });
+    const yRows = Object.entries(byYear).reverse().map(([y, r]) => {
+      const diff = r.s - r.b;
+      const label = r.n < 12 ? `${y} (${r.n} mo)` : y;
+      return el("tr", {}, [
+        el("td", { class: "num", text: label }), el("td", { class: "num r", text: pct(r.s - 1, 1) }),
+        el("td", { class: "num r", text: pct(r.b - 1, 1) }),
+        el("td", { class: "num r" }, [arrow(diff), ` ${diff >= 0 ? "+" : "−"}${Math.abs(diff * 100).toFixed(1)} pts`]),
+        el("td", { class: "num r", text: pct(r.a - 1, 1) }),
+      ]);
+    });
+    $("h-years").replaceChildren(el("table", {}, [
+      el("thead", {}, el("tr", {}, ["Year", "Strategy", "VAS", "Difference", "^AORD price"].map((x, i) => el("th", { class: i ? "r" : "", text: x })))),
+      el("tbody", {}, yRows),
+    ]));
+
+    // Month by month (newest first)
+    const mRows = months.map((m, i) => [m, i]).reverse().map(([m, i]) => el("tr", {}, [
+      el("td", { class: "num", text: fmtDate(m, { month: "short", year: "numeric" }) }),
+      el("td", { class: "num r", text: pct(rets.strategy[i], 1) }),
+      el("td", { class: "num r", text: pct(rets.BENCH_TR[i], 1) }),
+      el("td", { class: "mono", style: "white-space:normal;min-width:16ch", text: (strat.holdings.slice(i0)[i] || "cash").split(" ").join(", ") }),
+    ]));
+    $("h-months").replaceChildren(el("table", {}, [
+      el("thead", {}, el("tr", {}, ["Month", "Strategy", "VAS", "Held"].map((x, i) => el("th", { class: i && i < 3 ? "r" : "", text: x })))),
+      el("tbody", {}, mRows),
+    ]));
+  }
+
   function renderSettings(d) {
     const st = d.settings, f = st.filters;
     const items = [
@@ -769,7 +909,7 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
 
   let DATA = null;
   function render(d) {
-    renderHeader(d); renderRec(d); renderCompare(d);
+    renderHeader(d); renderRec(d); renderCompare(d); renderHistory(d);
     if (d.recommendations) { renderPicks(d); renderPerf(d); renderTrades(d); renderSettings(d); }
   }
   renderCmds();

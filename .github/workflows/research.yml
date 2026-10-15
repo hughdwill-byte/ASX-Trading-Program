@@ -80,7 +80,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           git add results/strategy_compare.csv results/strategy_compare.json results/validation.json \
-                  results/frozen_choice.json results/trials_log.csv
+                  results/frozen_choice.json results/trials_log.csv results/history.json
           if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -263,7 +263,11 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
 
     for t in shares:
         holds.append({"ticker": t, "entry": entry[t], "exit": None})
+    # What was held after each decision (index = decision date), for the dashboard's history view.
+    books = pd.Series([" ".join(sorted(t for t, q in b.items() if q)) for _, b, _ in snaps],
+                      index=dec_dates[: len(snaps)], dtype=object)
     return {
+        "books": books,
         "variant": v, "equity": equity, "monthly": monthly, "orders": pd.DataFrame(orders),
         "holdings": holds, "positions": positions_count, "costs": costs, "n_eff": n_eff,
         "skipped_reason": skipped_reason, "final_book": {**shares, core: core_sh + regime_etf},
