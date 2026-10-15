@@ -36,6 +36,27 @@ python stocktrade.py yesterday                    # evaluate yesterday's signals
 
 Global options: `--config path/to/config.yaml`, `--log-level DEBUG`.
 
+## TimesFM fast path
+
+`tfm-backtest` / `tfm-recommend` use Google's [TimesFM 2.5](https://github.com/google-research/timesfm)
+(zero-shot, Apache-2.0 weights) instead of training a classifier per symbol per day. Each rebalance
+date runs one batched forecast over every symbol passing the liquidity filters, ranks by forecast
+return, and holds the top N for `--hold` sessions (signal at close t, entry at open t+1, costs and
+slippage from `config.yaml`). Forecasts are cached in `data/timesfm_cache/`, so re-runs are seconds.
+
+```bash
+pip install "timesfm[torch]" scikit-learn pyyaml yfinance   # first run downloads ~800MB of weights
+python stocktrade.py ingest
+python stocktrade.py tfm-backtest --start-date 2025-04-01 --end-date 2025-09-30 --top 5 --hold 5
+python stocktrade.py tfm-backtest --start-date 2025-04-01 --end-date 2025-09-30 --signal momentum  # baseline
+python stocktrade.py tfm-recommend --top 5 --capital 5000
+python ml/test_timesfm_strategy.py                          # self-check, no weights needed
+```
+
+The report compares against the equal-weighted eligible universe and `--benchmark` (default `^AORD`).
+Speed: ~20 forecasts/s on a 4-core CPU (a 6-month weekly backtest over ~400 stocks ≈ 8 min cold);
+a CUDA GPU is used automatically. `--checkpoint` accepts a local folder with `model.safetensors`.
+
 ## Repo layout
 
 | Path | Purpose |

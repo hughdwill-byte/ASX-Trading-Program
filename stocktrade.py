@@ -1197,9 +1197,8 @@ class FeatureEngineer:
         data["prev_close_to_open_return"] = (
             (data["open"] - data["adj_close"].shift(1)) / data["adj_close"].shift(1)
         )
-        data["O2_30min_return"] = (
-            (data["open"].shift(-1) - data["open"]) / data["open"]
-        ).replace([np.inf, -np.inf], np.nan)
+        # O2_30min_return removed: it used tomorrow's open (look-ahead) and its NaN on the
+        # newest row made dropna() discard today, so `recommend` scored yesterday's data.
         data["day_of_week"] = data.index.dayofweek.astype(float)
 
         self._augment_weblink_features(data, resolved_symbol)
@@ -1808,7 +1807,6 @@ class ModelTrainer:
             "order_imbalance",
             "global_trend",
             "commodity_trend",
-            "O2_30min_return",
             "prev_close_to_open_return",
             "day_of_week",
             "news_sentiment_lag1",
@@ -3397,6 +3395,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of parallel workers for multi-day evaluation (default 1).",
     )
 
+    from ml.timesfm_strategy import add_cli_args
+
+    tfm_backtest = subparsers.add_parser(
+        "tfm-backtest", help="Fast TimesFM cross-sectional backtest vs universe and index benchmark."
+    )
+    tfm_backtest.add_argument("--start-date", required=True, help="Start date (YYYY-MM-DD).")
+    tfm_backtest.add_argument("--end-date", help="End date (YYYY-MM-DD), default latest data.")
+    add_cli_args(tfm_backtest)
+    tfm_recommend = subparsers.add_parser("tfm-recommend", help="TimesFM picks for the next session.")
+    tfm_recommend.add_argument("--capital", type=float, help="Override capital for position sizing.")
+    add_cli_args(tfm_recommend)
+
     return parser
 
 
@@ -3531,6 +3541,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 print(highlight_text(line, bool(item.get("is_asx200"))))
             print(f"\nCapital used: {result['capital'] - result['remaining_capital']:.2f}")
             print(f"Capital remaining: {result['remaining_capital']:.2f}")
+    elif args.command in {"tfm-backtest", "tfm-recommend"}:
+        from ml.timesfm_strategy import run_cli
+
+        return run_cli(args, orchestrator)
     elif args.command == "yesterday":
         if args.start_date or args.end_date or args.days:
             if not args.start_date:
