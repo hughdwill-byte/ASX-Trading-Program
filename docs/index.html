@@ -98,14 +98,14 @@ button { font: inherit; color: inherit; }
 .t-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
 .t-sym { font: 600 1.55rem/1 var(--f-mono); letter-spacing: 0.02em; }
 .t-name { font-size: 0.85rem; color: var(--ink-2); margin-top: 4px; overflow-wrap: anywhere; }
-.t-rank { font: 500 0.75rem/1 var(--f-mono); color: var(--muted); white-space: nowrap; }
-.t-fc { text-align: right; }
+.t-rank { font: 500 0.75rem/1.3 var(--f-mono); color: var(--muted); }
+.t-fc { text-align: right; flex: none; max-width: 45%; }
 .t-fc .big { font: 600 1.3rem/1 var(--f-mono); font-variant-numeric: tabular-nums; }
 .t-fc .lbl { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
-.kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 0.8fr); gap: 8px 12px; border-top: 1px solid var(--line); padding-top: 12px; }
 .kv div { display: grid; gap: 2px; min-width: 0; }
 .kv dt { font-size: 0.72rem; color: var(--muted); }
-.kv dd { margin: 0; font: 500 0.92rem/1.2 var(--f-mono); font-variant-numeric: tabular-nums; }
+.kv dd { margin: 0; font: 500 0.92rem/1.2 var(--f-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .mini-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.74rem; color: var(--ink-2); }
 .key { display: inline-flex; align-items: center; gap: 6px; }
 .key i { display: inline-block; width: 14px; height: 2px; border-radius: 2px; }
@@ -319,13 +319,14 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
 
     // grid + y ticks: 4 clean steps
     const step = niceStep((hi - lo) / 4);
+    const dec = Math.max(0, -Math.floor(Math.log10(step)));
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
       svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: css("--grid"), "stroke-width": 1 }));
-      const t = s("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }); t.textContent = o.yfmt(v); svg.append(t);
+      const t = s("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }); t.textContent = o.tickDecimals ? v.toFixed(dec) : o.yfmt(v); svg.append(t);
     }
     if (fin(o.baseline)) svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y(o.baseline), y2: y(o.baseline), stroke: css("--axis"), "stroke-width": 1 }));
     // x ticks: up to 5 evenly spaced dates
-    const xt = Math.min(5, n);
+    const xt = Math.max(2, Math.min(5, n, Math.floor((W - m.l - m.r) / 110) + 1));
     for (let k = 0; k < xt; k++) {
       const i = Math.round((k / Math.max(1, xt - 1)) * (n - 1));
       const t = s("text", { x: x(i), y: H - 4, "text-anchor": k === 0 ? "start" : k === xt - 1 ? "end" : "middle" });
@@ -459,7 +460,7 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
       const lead = Array(hist.length - 1).fill(null);
       requestAnimationFrame(() => lineChart(chart, {
         label: `${p.symbol}: last 60 closes and ${st.hold}-session TimesFM forecast`,
-        height: 150, yWidth: 48, dates, split: hist.length - 1,
+        height: 150, yWidth: 48, dates, split: hist.length - 1, tickDecimals: true,
         yfmt: (v) => v < 1 ? v.toFixed(3) : v.toFixed(2),
         series: [
           { label: "Close", color: css("--hist"), values: hist.concat(pad), endDot: false },
