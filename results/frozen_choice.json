@@ -1,0 +1,20 @@
+{
+  "10000_core0": {
+    "variant": "LOWVOL_N8_reg_B3",
+    "config_hash": "5f8b4aa939cb",
+    "timestamp": 1792128116.217375,
+    "selected_using_data_before": "2024-07-01"
+  },
+  "50000_core0": {
+    "variant": "RAMOM_N5_noreg_B1",
+    "config_hash": "7144bb5fcc71",
+    "timestamp": 1792128117.2347245,
+    "selected_using_data_before": "2024-07-01"
+  },
+  "50000_core0.6": {
+    "variant": "RAMOM_N5_noreg_B1",
+    "config_hash": "de637be7d4c6",
+    "timestamp": 1792128118.7583668,
+    "selected_using_data_before": "2024-07-01"
+  }
+}
