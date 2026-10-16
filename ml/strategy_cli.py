@@ -1,0 +1,525 @@
+"""CLI glue for strategy v2: strat-backtest, strat-recommend, strat-publish, tfm-cache."""
+
+from __future__ import annotations
+
+import csv
+import dataclasses
+import json
+import logging
+import pathlib
+import time
+from typing import Dict, List, Optional
+
+import pandas as pd
+
+from ml import validation as val
+from ml.portfolio import DEFAULTS, Variant, build_rank_cache, ew_universe, run_backtest_v2
+from ml.signals import TRADEABLE_SIGNALS, Context, tfm_cache_scores
+from ml.timesfm_strategy import load_benchmark, load_panel
+from stocktrade import project_path, sanitize_for_json
+
+logger = logging.getLogger(__name__)
+
+RESULTS = project_path("results")
+SETTINGS = [(10000.0, 0.0), (10000.0, 0.6), (50000.0, 0.0), (50000.0, 0.6)]
+BENCH_NOTE = "BENCH_TR = VAS.AX adjusted close (total return, net of fees); ^AORD is a price index and excludes dividends."
+FALLBACK_TEXT = "Hold {core} buy-and-hold; add new money in single orders of at least A$2,000."
+
+
+def add_cli_args(sub) -> None:
+    bt = sub.add_parser("strat-backtest", help="Run the strategy v2 grid + validation, write results/.")
+    bt.add_argument("--end", help="Last date to include (default: latest data).")
+    rec = sub.add_parser("strat-recommend", help="Today's tier and next-open orders for the configured strategy.")
+    rec.add_argument("--capital", type=float, help="Override capital.")
+    sub.add_parser("strat-publish", help="Merge strategy results into docs/data/latest.json.")
+    tc = sub.add_parser("tfm-cache", help="Monthly TimesFM forecast cache for TFM_REL/TFM_RAW research signals.")
+    tc.add_argument("--start", default="2016-01-01")
+    tc.add_argument("--end")
+    tc.add_argument("--transform", choices=["rel", "raw"], default="rel")
+    tc.add_argument("--horizon", type=int, default=21)
+    tc.add_argument("--checkpoint", default="google/timesfm-2.5-200m-pytorch")
+    tc.add_argument("--batch-size", type=int, default=128)
+    asic = sub.add_parser("asic-download", help="Download ASIC daily short-position reports (resumable).")
+    asic.add_argument("--start", default="2015-06-01")
+
+
+def strategy_config(orchestrator) -> dict:
+    import yaml
+
+    cfg = json.loads(json.dumps(DEFAULTS))
+    path = getattr(orchestrator, "config_path", None)
+    if path and pathlib.Path(path).exists() and str(path).endswith((".yaml", ".yml")):
+        raw = yaml.safe_load(pathlib.Path(path).read_text()) or {}
+        cfg.update(raw.get("strategy") or {})
+    return cfg
+
+
+def build_context(orchestrator, cfg: dict) -> Context:
+    from ml.dataset_builder import _resolve_symbol_list
+    from ml import data_asic
+
+    config = orchestrator.config
+    symbols = _resolve_symbol_list(None, config, orchestrator.ingestor, None)
+    core = cfg["core_ticker"].replace(".AX", "")
+    symbols = list(dict.fromkeys(list(symbols) + [core, "A200"]))
+    t0 = time.monotonic()
+    panel = load_panel(orchestrator.ingestor, symbols)
+    if core not in panel["adj_close"].columns:  # the benchmark must exist; fetch it directly if a batch dropped it
+        orchestrator.ingestor.exclusions.pop(core, None)
+        orchestrator.ingestor.fetch_ohlcv(core, refresh=True)
+        panel = load_panel(orchestrator.ingestor, symbols)
+    if core not in panel["adj_close"].columns:
+        raise ValueError(f"Benchmark ETF {core} could not be downloaded; cannot run strategy research.")
+    aord = load_benchmark("^AORD", config.data.base_path, config.data.start_date)
+    asic_dir = project_path(str(config.data.base_path), "asic_short")
+    si = None
+    cov = data_asic.coverage(asic_dir)
+    if cov["files"]:
+        si = data_asic.load_si(asic_dir, cfg["asic_lag_days"])
+    ctx = Context(panel, aord, cfg, tfm_dir=project_path(str(config.data.base_path), "tfm_cache"), asic=si)
+    ctx.asic_coverage = cov
+    logger.info("Context: %d tickers x %d days in %.1fs", ctx.A.shape[1], ctx.A.shape[0], time.monotonic() - t0)
+    return ctx
+
+
+def run_cli(args, orchestrator) -> int:
+    cfg = strategy_config(orchestrator)
+    if args.command == "asic-download":
+        from ml import data_asic
+
+        data_asic.download(project_path(str(orchestrator.config.data.base_path), "asic_short"), args.start)
+        return 0
+    ctx = build_context(orchestrator, cfg)
+    if args.command == "tfm-cache":
+        return tfm_cache(ctx, cfg, args)
+    if args.command == "strat-backtest":
+        return strat_backtest(ctx, cfg, args)
+    if args.command == "strat-recommend":
+        return strat_recommend(ctx, cfg, args)
+    if args.command == "strat-publish":
+        return strat_publish(cfg)
+    return 1
+
+
+# ---- tfm-cache -------------------------------------------------------------------------------
+
+def tfm_cache(ctx: Context, cfg: dict, args) -> int:
+    from ml.timesfm_strategy import load_timesfm
+
+    import torch
+
+    torch.manual_seed(42)
+    torch.set_num_threads(4)
+    forecaster = load_timesfm(args.checkpoint, 512, args.batch_size, positive=args.transform == "raw")
+    core = cfg["core_ticker"].replace(".AX", "")
+    bench = ctx.A_last[core]
+    out_dir = ctx.tfm_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows = ctx.decision_rows(args.start, args.end)
+    todo = [i for i in rows if not (out_dir / f"{args.transform}_{ctx.dates[i]:%Y-%m-%d}.csv").exists()]
+    limit = cfg["universe_size"]
+    started = time.monotonic()
+    for n, i in enumerate(todo, 1):
+        names = ctx.eligible(i)[:limit]
+        t = time.monotonic()
+        df = tfm_cache_scores(ctx, args.transform, i, names, forecaster, bench, horizon=args.horizon)
+        df.to_csv(out_dir / f"{args.transform}_{ctx.dates[i]:%Y-%m-%d}.csv", index=False)
+        if n == 1:
+            projected = (time.monotonic() - t) * len(todo) / 60
+            logger.info("First date took %.1fs; projected total %.0f min for %d dates.", time.monotonic() - t,
+                        projected, len(todo))
+            if projected > 300 and limit > 150:
+                limit = 150
+                logger.warning("Projection over 300 min: restricting TFM forecasts to the top 150 by MDV60.")
+        logger.info("tfm-cache %s %d/%d %s (%d series) %.0fs elapsed", args.transform, n, len(todo),
+                    ctx.dates[i].date(), len(df), time.monotonic() - started)
+    (out_dir / f"{args.transform}_meta.json").write_text(json.dumps({"universe_limit": limit, "horizon": args.horizon}))
+    return 0
+
+
+# ---- strat-backtest --------------------------------------------------------------------------
+
+def grid(signals_available: List[str], si_ok: bool) -> List[Variant]:
+    vs = [Variant(signal=s, n=n, regime=r) for s in TRADEABLE_SIGNALS for n in (5, 8) for r in (False, True)]
+    vs.append(Variant(signal="RAMOM", n=5, regime=False, buffer_mult=1))
+    vs.append(Variant(signal="RAMOM", n=5, regime=True, si_screen=True))
+    return vs
+
+
+TRADING_FIELDS = ("turnover", "orders_per_year", "brokerage_drag", "slippage_drag", "cost_drag", "avg_positions",
+                  "avg_holding_days", "pct_disposals_lt_365")
+
+
+def _period_rows(result, bench_m, ew_m, label, setting, extra=None, engine=True) -> List[dict]:
+    rows = []
+    for period in val.PERIODS:
+        m = val.metrics(result, bench_m, ew_m, period)
+        if not engine:  # index / universe / selection series have no orders of their own
+            m.update({k: None for k in TRADING_FIELDS if k in m})
+        rows.append({"id": label, "setting": setting, "period": period, **(extra or {}), **m})
+    return rows
+
+
+def strat_backtest(ctx: Context, cfg: dict, args) -> int:
+    run_start = time.time()
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    frozen_path = RESULTS / "frozen_choice.json"
+    if frozen_path.exists():
+        frozen_path.unlink()  # a fresh selection every research run; written again before the hold-out is read
+    end = args.end
+    rows_needed = ctx.decision_rows(cfg["start"], end)
+    tfm_ok = {}
+    for sig, tr in (("TFM_REL", "rel"), ("TFM_RAW", "raw")):
+        have = sum((ctx.tfm_dir / f"{tr}_{ctx.dates[i]:%Y-%m-%d}.csv").exists() for i in rows_needed)
+        tfm_ok[sig] = have >= len(rows_needed) - 1  # the latest month-end may not be cached yet
+        if 0 < have < len(rows_needed) - 1:
+            logger.warning("%s cache covers %d/%d decision dates; skipping TFM variants.", sig, have, len(rows_needed))
+    si_ok = ctx.asic is not None and bool(getattr(ctx, "asic_coverage", {}).get("complete"))
+    signals = [s for s in TRADEABLE_SIGNALS if not s.startswith("TFM") or tfm_ok[s]]
+    t0 = time.monotonic()
+    ranks = build_rank_cache(ctx, signals, end=end, start=cfg["start"])
+    logger.info("Rank cache for %s in %.1fs", signals, time.monotonic() - t0)
+
+    ew_m = ew_universe(ctx, cfg, end)
+    aord_m = ctx.aord.reindex(ctx.dates[ctx.decision_rows(cfg["start"], end)]).pct_change().dropna() \
+        if ctx.aord is not None else pd.Series(dtype=float)
+
+    compare: List[dict] = []
+    trials: List[dict] = []
+    per_setting: Dict[str, dict] = {}
+    for capital, core_w in SETTINGS:
+        setting = f"{int(capital)}_core{core_w:g}"
+        bench = run_backtest_v2(ctx, Variant(core_weight=1.0, capital=capital), cfg, ranks, end)
+        bench_m = bench["monthly"]
+        compare += _period_rows(bench, bench_m, ew_m, "BENCH_TR", setting, {"label": "VAS.AX buy-and-hold (total return)"})
+        for label, m in (("AORD_PRICE", aord_m), ("EW_UNIV", ew_m)):
+            fake = {"monthly": m, "equity": (1 + m).cumprod() * capital, "orders": pd.DataFrame(columns=[
+                "date", "side", "value", "brokerage", "slippage"]), "holdings": [], "positions": []}
+            note = "price index, excludes dividends" if label == "AORD_PRICE" else "equal-weight eligible universe, gross"
+            compare += _period_rows(fake, bench_m, ew_m, label, setting, {"label": note}, engine=False)
+
+        results: Dict[str, dict] = {}
+        for v in grid(signals, si_ok):
+            v = dataclasses.replace(v, capital=capital, core_weight=core_w)
+            skip = None
+            if v.signal.startswith("TFM") and not tfm_ok[v.signal]:
+                skip = "TimesFM forecast cache missing (run tfm-cache)"
+            elif v.si_screen and not si_ok:
+                skip = "insufficient free ASIC history"
+            if skip:
+                compare.append({"id": v.id, "setting": setting, "period": "full", "skipped_reason": skip,
+                                **_variant_fields(v)})
+                continue
+            r = run_backtest_v2(ctx, v, cfg, ranks, end)
+            results[v.id] = r
+            extra = {**_variant_fields(v), "skipped_reason": r["skipped_reason"]}
+            compare += _period_rows(r, bench_m, ew_m, v.id, setting, extra)
+            trials.append({"setting": setting, "variant": v.id, "config_hash": v.config_hash(),
+                           "sharpe_full": val.sharpe(r["monthly"]), "timestamp": run_start})
+        per_setting[setting] = {"results": results, "bench": bench, "bench_m": bench_m}
+
+    _append_trials(trials)
+
+    # ---- validation per setting ----
+    validation: Dict[str, dict] = {"benchmark_note": BENCH_NOTE, "settings": {}}
+    validation["ic"] = {s: val.rank_ic(ctx, s, ctx.decision_rows(cfg["start"], end), ctx.A_last[cfg["core_ticker"].replace(".AX", "")])
+                        for s in signals + ["MOM_12_1"]}
+    validation["asic_coverage"] = getattr(ctx, "asic_coverage", None)
+    for setting, data in per_setting.items():
+        res = {k: r for k, r in data["results"].items() if r["n_eff"]}
+        if not res:
+            validation["settings"][setting] = {"tier": "FALLBACK", "reasons": ["satellite disabled at this capital"]}
+            continue
+        monthly = {k: r["monthly"] for k, r in res.items()}
+        turnover = {k: val.metrics(r, data["bench_m"], ew_m, "full").get("turnover", 0.0) for k, r in res.items()}
+        hashes = {k: r["variant"].config_hash() for k, r in res.items()}
+        wf = val.walk_forward_select(monthly, turnover)
+        frozen_info = val.freeze_choice(monthly, turnover, hashes, frozen_path, setting)
+        validation["settings"][setting] = _validate_setting(ctx, cfg, setting, res, data, ew_m, wf, frozen_info,
+                                                            frozen_path, ranks, end, signals)
+        wf_row = {"monthly": wf["monthly"], "equity": (1 + wf["monthly"]).cumprod(),
+                  "orders": pd.DataFrame(columns=["date", "side", "value", "brokerage", "slippage"]),
+                  "holdings": [], "positions": []}
+        compare += [{**row, "label": "walk-forward selection"} for row in
+                    _period_rows(wf_row, data["bench_m"], ew_m, "WF_SELECT", setting, engine=False)
+                    if row["period"] == "walk_forward"]
+
+    _write_compare(compare)
+    _write_history(per_setting, aord_m, ew_m)
+    (RESULTS / "validation.json").write_text(json.dumps(sanitize_for_json(validation), indent=1))
+    logger.info("strat-backtest finished in %.1f min", (time.time() - run_start) / 60)
+    _print_summary(compare, validation, cfg)
+    return 0
+
+
+def _write_history(per_setting: Dict[str, dict], aord_m: pd.Series, ew_m: pd.Series) -> None:
+    """Month-by-month net returns and holdings for every variant, so the dashboard can replay any start date."""
+    out = {"note": "Monthly net returns after brokerage and slippage; holdings are what each strategy held "
+                   "during the month ending on that date.", "settings": {}}
+    for setting, data in per_setting.items():
+        dates = data["bench_m"].index
+        ser = lambda m: [round(float(x), 6) if pd.notna(x) else None for x in m.reindex(dates)]
+        strategies = {}
+        for vid, r in data["results"].items():
+            held = r["books"].shift(1).reindex(dates)  # decided at the previous month-end, held through this month
+            strategies[vid] = {"returns": ser(r["monthly"]),
+                               "holdings": [h if isinstance(h, str) else "" for h in held]}
+        out["settings"][setting] = {
+            "dates": [d.date().isoformat() for d in dates],
+            "baselines": {"BENCH_TR": ser(data["bench_m"]), "AORD_PRICE": ser(aord_m), "EW_UNIV": ser(ew_m)},
+            "strategies": strategies,
+        }
+    (RESULTS / "history.json").write_text(json.dumps(out, separators=(",", ":")))
+
+
+def _variant_fields(v: Variant) -> dict:
+    return {"signal": v.signal, "n": v.n, "regime": v.regime, "buffer_mult": v.buffer_mult,
+            "core_weight": v.core_weight, "capital": v.capital, "si_screen": v.si_screen}
+
+
+def _validate_setting(ctx, cfg, setting, res, data, ew_m, wf, frozen_info, frozen_path, ranks, end, signals) -> dict:
+    bench_m = data["bench_m"]
+    bench = data["bench"]
+    # Hold-out is only evaluated after the frozen choice exists on disk.
+    vid = val.hold_out_gate(frozen_path, setting, time.time())
+    r = res[vid]
+    v: Variant = r["variant"]
+    met = {p: val.metrics(r, bench_m, ew_m, p) for p in val.PERIODS}
+    bmet = {p: val.metrics(bench, bench_m, ew_m, p) for p in val.PERIODS}
+    wf_res = {"monthly": wf["monthly"], "equity": (1 + wf["monthly"]).cumprod(),
+              "orders": pd.DataFrame(columns=["date", "side", "value", "brokerage", "slippage"]),
+              "holdings": [], "positions": []}
+    wf_met = val.metrics(wf_res, bench_m, ew_m, "walk_forward")
+
+    # Trial statistics up to 2024-06 (selection data only).
+    cut = pd.Timestamp("2024-07-01")
+    selection = {k: x["monthly"].loc[x["monthly"].index < cut] for k, x in res.items()}
+    trial_srs = [s.mean() / s.std() for s in selection.values() if len(s) > 12 and s.std() > 0]
+    n_trials = max(_trial_count(setting), len(trial_srs), 22)
+    dsr_frozen = val.dsr(r["monthly"].to_numpy(), trial_srs, n_trials)
+    dsr_wf = val.dsr(wf["monthly"].to_numpy(), trial_srs, n_trials)
+    M = pd.DataFrame(selection).dropna()
+    pbo = val.pbo_cscv(M.to_numpy(), S=10)
+
+    # Neighbours: differ in exactly one of N, regime, buffer.
+    neighbours = [dataclasses.replace(v, n=8 if v.n == 5 else 5), dataclasses.replace(v, regime=not v.regime),
+                  dataclasses.replace(v, buffer_mult=1 if v.buffer_mult != 1 else 3)]
+    nb_rows, extra_trials = [], []
+    for nv in neighbours:
+        nr = res.get(nv.id) or run_backtest_v2(ctx, nv, cfg, ranks, end)
+        if nv.id not in res:
+            extra_trials.append({"setting": setting, "variant": nv.id, "config_hash": nv.config_hash(),
+                                 "sharpe_full": val.sharpe(nr["monthly"]), "timestamp": time.time()})
+        nm = val.metrics(nr, bench_m, ew_m, "walk_forward")
+        ok = nm.get("cagr", -1) > bmet["walk_forward"].get("cagr", 0) and nm.get("sharpe", -9) >= bmet["walk_forward"].get("sharpe", 9)
+        nb_rows.append({"variant": nv.id, "passes_a_wf": bool(ok), "cagr": nm.get("cagr"), "sharpe": nm.get("sharpe")})
+    _append_trials(extra_trials)
+
+    stress = run_backtest_v2(ctx, dataclasses.replace(v, slip_mult=cfg["cost_stress_mult"]), cfg, ranks, end)
+    stress_met = val.metrics(stress, bench_m, ew_m, "full")
+    yearly = pd.DataFrame({"strategy": (1 + r["monthly"]).groupby(r["monthly"].index.year).prod() - 1,
+                           "bench": (1 + bench_m).groupby(bench_m.index.year).prod() - 1})
+    windows = {}
+    for name, (a, b) in {"covid_2020_02_04": ("2020-02-01", "2020-04-30"), "year_2022": ("2022-01-01", "2022-12-31")}.items():
+        sl = lambda s: float((1 + s.loc[a:b]).prod() - 1)
+        windows[name] = {"strategy": sl(r["monthly"]), "bench": sl(bench_m)}
+    decision = val.acceptance(met["hold_out"], met["full"], wf_met, bmet["walk_forward"], bmet["hold_out"],
+                              bmet["full"], dsr_frozen["dsr"], pbo["pbo"], met["full"].get("cost_drag", 1.0),
+                              sum(n["passes_a_wf"] for n in nb_rows), r["n_eff"])
+    return {
+        "frozen": {**frozen_info, "variant": vid}, "walk_forward_picks": wf["picks"],
+        "metrics": met, "bench_metrics": bmet, "wf_select": wf_met,
+        "dsr_frozen": dsr_frozen, "dsr_wf_select": dsr_wf, "pbo": {"pbo": pbo["pbo"], "combinations": pbo["combinations"],
+                                                                   "logits": pbo["logits"]},
+        "neighbours": nb_rows, "cost_stress": stress_met,
+        "survivorship": {"excess_full": met["full"].get("excess_vs_bench"),
+                         "minus_1_5pct": (met["full"].get("excess_vs_bench") or 0) - 0.015,
+                         "minus_3pct": (met["full"].get("excess_vs_bench") or 0) - 0.03},
+        "calendar_years": {str(y): row for y, row in yearly.to_dict("index").items()},
+        "stress_windows": windows, **decision,
+    }
+
+
+def _trial_count(setting: str) -> int:
+    path = RESULTS / "trials_log.csv"
+    if not path.exists():
+        return 0
+    df = pd.read_csv(path)
+    return int(df.loc[df["setting"] == setting, "config_hash"].nunique())
+
+
+def _append_trials(rows: List[dict]) -> None:
+    if not rows:
+        return
+    path = RESULTS / "trials_log.csv"
+    new = not path.exists()
+    with path.open("a", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=["timestamp", "setting", "variant", "config_hash", "sharpe_full"])
+        if new:
+            w.writeheader()
+        for row in rows:
+            w.writerow({k: row.get(k) for k in w.fieldnames})
+
+
+def _write_compare(rows: List[dict]) -> None:
+    df = pd.DataFrame(rows)
+    df.to_csv(RESULTS / "strategy_compare.csv", index=False)
+    (RESULTS / "strategy_compare.json").write_text(json.dumps(sanitize_for_json(rows), indent=1))
+
+
+def _print_summary(compare: List[dict], validation: dict, cfg: dict) -> None:
+    df = pd.DataFrame(compare)
+    for period in ("walk_forward", "hold_out"):
+        for setting in ("10000_core0", "50000_core0", "50000_core0.6"):
+            sub = df[(df["period"] == period) & (df["setting"] == setting) & df["cagr"].notna()]
+            if sub.empty:
+                continue
+            print(f"\n== {period} | {setting} ==")
+            cols = ["id", "cagr", "sharpe", "mdd", "turnover", "cost_drag", "excess_vs_bench", "excess_ci_lo"]
+            print(sub[[c for c in cols if c in sub]].sort_values("sharpe", ascending=False).to_string(
+                index=False, float_format=lambda x: f"{x:+.3f}"))
+    print("\nRank IC:", json.dumps(sanitize_for_json(validation.get("ic")), indent=1))
+    for s, v in validation["settings"].items():
+        print(f"\n{s}: tier={v.get('tier')} frozen={v.get('frozen', {}).get('variant')} "
+              f"DSR={v.get('dsr_frozen', {}).get('dsr')} PBO={v.get('pbo', {}).get('pbo')}")
+        for reason in v.get("reasons", []):
+            print("   fails", reason)
+
+
+# ---- strat-recommend / publish ---------------------------------------------------------------
+
+def _configured_setting(cfg: dict) -> str:
+    cap, core = min(SETTINGS, key=lambda s: (abs(s[0] - cfg["capital"]), abs(s[1] - cfg["core_weight"])))
+    return f"{int(cap)}_core{core:g}"
+
+
+def _with_pending_day(ctx: Context) -> Context:
+    """Append a placeholder next business day (prices = last close) so the engine emits next-open orders."""
+    nxt = ctx.dates[-1] + pd.offsets.BDay(1)
+    for name in ("A", "C", "V", "AO", "A_last", "MDV60", "base", "VOL_252", "VOL_63", "MOM_12_1", "RAMOM", "LOWVOL"):
+        f = getattr(ctx, name)
+        row = ctx.A_last.iloc[[-1]] if name in ("AO",) else f.iloc[[-1]]
+        if name == "base":
+            row = f.iloc[[-1]] & False
+        setattr(ctx, name, pd.concat([f, row.set_axis([nxt])]))
+    if ctx.aord is not None:
+        ctx.aord = pd.concat([ctx.aord, ctx.aord.iloc[[-1]].set_axis([nxt])])
+    ctx.dates = ctx.dates.append(pd.DatetimeIndex([nxt]))
+    return ctx
+
+
+def strat_recommend(ctx: Context, cfg: dict, args) -> int:
+    if args.capital:
+        cfg["capital"] = args.capital
+    validation_path = RESULTS / "validation.json"
+    validation = json.loads(validation_path.read_text()) if validation_path.exists() else {}
+    setting = _configured_setting(cfg)
+    sv = validation.get("settings", {}).get(setting, {})
+    tier = sv.get("tier", "FALLBACK")
+    reasons = sv.get("reasons", ["no research results yet: run the research workflow (strat-backtest)"])
+    vid = sv.get("frozen", {}).get("variant")
+    core = cfg["core_ticker"]
+    last = ctx.dates[-1]
+    orders, holdings = [], {}
+    is_decision_day = (last + pd.offsets.BDay(1)).month != last.month
+    if tier in ("LIVE", "PAPER") and vid:
+        v = next(x for x in grid([], True) if x.id == vid.split("_slipx")[0])
+        v = dataclasses.replace(v, capital=cfg["capital"], core_weight=cfg["core_weight"])
+        if is_decision_day:
+            ctx = _with_pending_day(ctx)
+        r = run_backtest_v2(ctx, v, cfg)
+        holdings = r["final_book"]
+        if is_decision_day and len(r["orders"]):
+            o = r["orders"][r["orders"]["date"] == ctx.dates[-1]]
+            orders = [{"ticker": f"{x.ticker}.AX", "side": x.side, "shares": int(x.shares), "est_price": float(x.price),
+                       "est_cost": float(x.brokerage + x.slippage)} for x in o.itertuples()]
+        if tier == "PAPER":
+            _paper_append(vid, last, r)
+    if tier == "LIVE":
+        action = (f"Follow {vid}: place the orders below at the next open." if orders
+                  else f"Follow {vid}: no trades today; the next review is the last trading day of the month.")
+    else:
+        action = FALLBACK_TEXT.format(core=core)
+        if tier == "PAPER":
+            action += f" {vid} is being paper-tracked as a candidate."
+    rec = {"tier": tier, "strategy_id": vid, "action_text": action, "as_of": last.date().isoformat(),
+           "reasons": reasons, "setting": setting, "orders_next_open": orders,
+           "holdings": {k: int(v) for k, v in holdings.items() if v}}
+    _survivorship_log(ctx, cfg)
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    (RESULTS / "recommendation.json").write_text(json.dumps(sanitize_for_json(rec), indent=1))
+    print(f"\nTier: {tier}\n{action}")
+    for o in orders:
+        print(f"  {o['side']:<4} {o['shares']:>6} {o['ticker']:<8} ~${o['est_price']:.2f}")
+    for reason in reasons:
+        print("  -", reason)
+    return 0
+
+
+def _paper_append(vid: str, as_of: pd.Timestamp, r: dict) -> None:
+    path = RESULTS / "paper" / f"{vid}.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and as_of.date().isoformat() in path.read_text():
+        return
+    eq = r["equity"]
+    new = not path.exists()
+    with path.open("a", newline="") as fh:
+        w = csv.writer(fh)
+        if new:
+            w.writerow(["date", "equity", "positions"])
+        w.writerow([as_of.date().isoformat(), f"{float(eq.iloc[-1]):.2f}", ";".join(sorted(r["final_book"]))])
+
+
+def _survivorship_log(ctx: Context, cfg: dict) -> None:
+    """Forward-looking delisting record: tickers whose last price is more than 10 trading days old."""
+    path = RESULTS / "survivorship" / "vanished.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    seen = set(pd.read_csv(path)["ticker"]) if path.exists() else set()
+    rows = []
+    n = len(ctx.dates)
+    for t in ctx.A.columns:
+        lv = ctx.A[t].last_valid_index()
+        if lv is None or t in seen:
+            continue
+        if n - 1 - ctx.dates.get_loc(lv) > cfg["stale_days"] and lv >= ctx.dates[-260]:
+            rows.append({"ticker": t, "last_date": lv.date().isoformat(), "last_close": float(ctx.C[t].loc[lv])})
+    if rows:
+        pd.DataFrame(rows).to_csv(path, mode="a", header=not path.exists(), index=False)
+
+
+def strat_publish(cfg: dict, results_dir: pathlib.Path = RESULTS, out: Optional[pathlib.Path] = None) -> int:
+    out = out or project_path("docs", "data", "latest.json")
+    RESULTS = results_dir  # noqa: N806 - local override for tests
+    payload = json.loads(out.read_text()) if out.exists() else {}
+    rec_path, cmp_path, val_path = RESULTS / "recommendation.json", RESULTS / "strategy_compare.json", RESULTS / "validation.json"
+    rec = json.loads(rec_path.read_text()) if rec_path.exists() else {}
+    validation = json.loads(val_path.read_text()) if val_path.exists() else {}
+    compare = json.loads(cmp_path.read_text()) if cmp_path.exists() else []
+    setting_status = {s: v for s, v in validation.get("settings", {}).items()}
+    rows = []
+    for row in compare:
+        sv = setting_status.get(row.get("setting"), {})
+        passes = sv.get("passes") if sv.get("frozen", {}).get("variant") == row.get("id") else None
+        rows.append({**row, "passes": passes, "is_frozen": passes is not None})
+    cache_files = sorted(project_path("data", "tfm_cache").glob("*_*.csv"))
+    payload.update({
+        "recommendation": {k: rec.get(k) for k in ("tier", "strategy_id", "action_text", "as_of", "reasons", "setting")}
+        if rec else {"tier": "FALLBACK", "action_text": FALLBACK_TEXT.format(core=cfg["core_ticker"]), "reasons": []},
+        "strategy_comparison": rows,
+        "orders_next_open": rec.get("orders_next_open", []),
+        "benchmark_note": BENCH_NOTE,
+        "validation_summary": {s: {k: v.get(k) for k in ("tier", "frozen", "dsr_frozen", "pbo", "neighbours",
+                                                         "walk_forward_picks", "survivorship", "stress_windows")}
+                               for s, v in setting_status.items()},
+        "signal_ic": validation.get("ic"),
+        "history": json.loads((RESULTS / "history.json").read_text()) if (RESULTS / "history.json").exists() else None,
+        "data_flags": {
+            "asic_stale": not bool((validation.get("asic_coverage") or {}).get("complete")),
+            "survivorship_note": "Backtests use today's listings only; delisted companies are missing, so results are biased upward.",
+            "tfm_cache_date": cache_files[-1].stem.split("_")[-1] if cache_files else None,
+        },
+    })
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(sanitize_for_json(payload), indent=1))
+    print(f"Merged strategy results into {out}")
+    return 0

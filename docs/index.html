@@ -63,6 +63,7 @@ body {
   padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
 .wrap { max-width: 1160px; margin: 0 auto; padding-block: 20px 64px; display: grid; gap: 40px; }
+.wrap > * { min-width: 0; }
 h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
 h1 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); line-height: 1.1; }
 h2 { font-size: 1.35rem; }
@@ -88,7 +89,7 @@ button { font: inherit; color: inherit; }
 .banner { padding: 12px 16px; border-radius: var(--r); background: var(--sunk); border-left: 4px solid var(--warn); }
 
 /* Section heads */
-.sec { display: grid; gap: 18px; }
+.sec { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
 .sec-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; justify-content: space-between; }
 .sec-head p { font-size: 0.92rem; }
 
@@ -98,14 +99,14 @@ button { font: inherit; color: inherit; }
 .t-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
 .t-sym { font: 600 1.55rem/1 var(--f-mono); letter-spacing: 0.02em; }
 .t-name { font-size: 0.85rem; color: var(--ink-2); margin-top: 4px; overflow-wrap: anywhere; }
-.t-rank { font: 500 0.75rem/1 var(--f-mono); color: var(--muted); white-space: nowrap; }
-.t-fc { text-align: right; }
+.t-rank { font: 500 0.75rem/1.3 var(--f-mono); color: var(--muted); }
+.t-fc { text-align: right; flex: none; max-width: 45%; }
 .t-fc .big { font: 600 1.3rem/1 var(--f-mono); font-variant-numeric: tabular-nums; }
 .t-fc .lbl { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
-.kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 0.8fr); gap: 8px 12px; border-top: 1px solid var(--line); padding-top: 12px; }
 .kv div { display: grid; gap: 2px; min-width: 0; }
 .kv dt { font-size: 0.72rem; color: var(--muted); }
-.kv dd { margin: 0; font: 500 0.92rem/1.2 var(--f-mono); font-variant-numeric: tabular-nums; }
+.kv dd { margin: 0; font: 500 0.92rem/1.2 var(--f-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .mini-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.74rem; color: var(--ink-2); }
 .key { display: inline-flex; align-items: center; gap: 6px; }
 .key i { display: inline-block; width: 14px; height: 2px; border-radius: 2px; }
@@ -137,6 +138,32 @@ button { font: inherit; color: inherit; }
 .tip .row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
 .tip .row span:first-child { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); }
 .tip .row b { font-family: var(--f-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Recommendation */
+.rec { display: grid; gap: 10px; padding: 20px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
+.rec-top { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.rec h2 { font-size: 1.1rem; color: var(--ink-2); font-family: var(--f-body); font-weight: 600; }
+.rec-action { font: 600 clamp(1.15rem, 2.4vw, 1.5rem)/1.3 var(--f-display); max-width: 60ch; }
+.tier { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--sunk); font: 600 0.8rem/1 var(--f-mono); letter-spacing: 0.06em; }
+.tier .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+.tier.LIVE .dot { background: var(--good); }
+.tier.PAPER .dot { background: var(--warn); }
+details summary { cursor: pointer; color: var(--ink-2); font-size: 0.9rem; }
+details[open] summary { margin-bottom: 8px; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 0.86rem; color: var(--ink-2); }
+.filters label { display: inline-flex; gap: 8px; align-items: center; min-width: 0; max-width: 100%; }
+.filters select { min-width: 0; max-width: 100%; text-overflow: ellipsis; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--ink); }
+th[aria-sort="descending"]::after { content: " ↓"; } th[aria-sort="ascending"]::after { content: " ↑"; }
+tr.pass td { background: var(--accent-wash); }
+tr.skip td { color: var(--muted); }
+tr.base td:first-child { font-style: italic; }
+.badge { display: inline-block; margin-left: 6px; padding: 2px 6px; border-radius: 4px; font: 600 0.65rem/1.2 var(--f-mono); letter-spacing: 0.05em; background: var(--sunk); color: var(--ink-2); vertical-align: middle; }
+.small { font-size: 0.8rem; }
+.pass-key { background: var(--accent-wash); padding: 0 4px; border-radius: 3px; color: var(--ink); }
+.legacy-note { font-size: 0.86rem; border-left-color: var(--axis); }
+.val-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 10px; min-width: 0; }
 
 /* Tables */
 .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
@@ -175,7 +202,7 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
     <div class="mast-text">
       <span class="eyebrow">ASX equities · daily forecast</span>
       <h1>ASX TimesFM Picks</h1>
-      <p class="sub">Every weekday after the close, Google's TimesFM model forecasts the next few sessions for every liquid ASX stock. The strongest forecasts become tomorrow's picks, and the same rule is replayed over the last six months with real brokerage and slippage.</p>
+      <p class="sub">Every month the program tests 22 cost-aware strategies on 10 years of ASX prices against a total-return All Ords benchmark. It recommends a strategy only if it passes every out-of-sample and overfitting test; otherwise it recommends a low-cost index ETF.</p>
     </div>
     <div class="status">
       <span class="pill" id="data-pill"><span class="dot"></span><span id="data-date">Loading…</span></span>
@@ -186,17 +213,76 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
 
   <div id="banner" class="banner" hidden></div>
 
+  <section class="rec" id="rec" aria-labelledby="rec-h" hidden>
+    <div class="rec-top">
+      <span class="tier" id="rec-tier"><span class="dot"></span><span id="rec-tier-text">—</span></span>
+      <span class="eyebrow" id="rec-asof"></span>
+    </div>
+    <h2 id="rec-h">Today's recommendation</h2>
+    <p class="rec-action" id="rec-action"></p>
+    <div class="tbl-wrap" id="rec-orders" hidden></div>
+    <details id="rec-reasons-box" hidden>
+      <summary>Why not a stock strategy? <span id="rec-reason-count"></span></summary>
+      <ul class="risks" id="rec-reasons"></ul>
+    </details>
+  </section>
+
+  <section class="sec" id="compare-sec" aria-labelledby="compare-h" hidden>
+    <div class="sec-head">
+      <h2 id="compare-h">Strategy comparison vs All Ords</h2>
+      <p class="sub" id="bench-note"></p>
+    </div>
+    <div class="filters">
+      <label>Period <select id="cmp-period">
+        <option value="walk_forward">Walk-forward 2019–2024</option>
+        <option value="hold_out">Hold-out 2024–2026</option>
+        <option value="full">Full 2016–2026</option>
+        <option value="design">Design 2016–2019</option>
+      </select></label>
+      <label>Capital <select id="cmp-setting"></select></label>
+    </div>
+    <div class="tbl-wrap" id="cmp-table"></div>
+    <p class="sub small">Net of A$6.50 brokerage and tiered slippage. Click a column to sort. <span class="pass-key">Highlighted</span> = passes all nine acceptance tests. Grey = not run (reason shown). Excess return is annualised vs VAS.AX with a 90% bootstrap interval.</p>
+    <div class="two-col" id="val-box"></div>
+  </section>
+
+  <section class="sec" id="hist-sec" aria-labelledby="hist-h" hidden>
+    <div class="sec-head">
+      <h2 id="hist-h">How it would have done</h2>
+      <p class="sub">Replay any strategy from the year you choose. Net of brokerage and slippage; VAS includes dividends.</p>
+    </div>
+    <div class="filters">
+      <label>Capital <select id="h-setting"></select></label>
+      <label>Strategy <select id="h-strat"></select></label>
+      <label>Starting <select id="h-start"></select></label>
+    </div>
+    <div class="kpis" id="h-kpis"></div>
+    <div class="card">
+      <div class="legend" id="h-legend"></div>
+      <div class="chart" id="h-chart"></div>
+    </div>
+    <h3>Year by year</h3>
+    <div class="tbl-wrap" id="h-years"></div>
+    <details id="h-months-box">
+      <summary>What it held each month</summary>
+      <div class="tbl-wrap" id="h-months"></div>
+    </details>
+    <p class="sub small">Backtest on today's listed companies only: firms that later collapsed or delisted are missing, so these results are better than real trading would have been.</p>
+  </section>
+
   <section class="sec" aria-labelledby="picks-h">
     <div class="sec-head">
-      <h2 id="picks-h">Picks for the next session</h2>
+      <h2 id="picks-h">Legacy: weekly TimesFM picks</h2>
       <p class="sub" id="picks-sub">Buy at the open, sell at the close after the holding period.</p>
+    </div>
+    <div class="banner legacy-note">The original weekly TimesFM strategy, kept for reference. Its weekly trading costs about 0.9% a week, so it is not recommended. See the recommendation above.
     </div>
     <div class="tickets" id="tickets"></div>
   </section>
 
   <section class="sec" aria-labelledby="perf-h">
     <div class="sec-head">
-      <h2 id="perf-h">Track record</h2>
+      <h2 id="perf-h">Legacy track record</h2>
       <p class="sub" id="perf-sub">Replayed with the same rules, after costs.</p>
     </div>
     <div class="kpis" id="kpis"></div>
@@ -216,19 +302,19 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
 
   <section class="sec" aria-labelledby="trades-h">
     <div class="sec-head">
-      <h2 id="trades-h">Recent trades</h2>
+      <h2 id="trades-h">Legacy recent trades</h2>
       <p class="sub">Latest 30 backtest trades, newest first. P&amp;L includes brokerage on both legs.</p>
     </div>
     <div class="tbl-wrap" id="trades"></div>
   </section>
 
   <section class="sec" aria-labelledby="how-h">
-    <h2 id="how-h">How a pick is made</h2>
+    <h2 id="how-h">How the recommendation is made</h2>
     <ol class="steps">
-      <li><h3>Screen the market</h3><p>Start from every ASX listing. Keep stocks with 3+ years of history, a price of at least 25c and $500k+ average daily turnover.</p></li>
-      <li><h3>Forecast with TimesFM</h3><p>Feed each stock's last two years of daily closes to TimesFM 2.5, a pretrained time-series model. It returns a median path plus a 10th–90th percentile range.</p></li>
-      <li><h3>Rank by edge per unit of risk</h3><p>Score = forecast return ÷ width of the forecast range. Only forecasts that beat round-trip slippage qualify.</p></li>
-      <li><h3>Trade and repeat</h3><p>Buy the top picks at the next open in equal dollar amounts, sell at the close after the holding period, then rebalance.</p></li>
+      <li><h3>Screen the market</h3><p>Each month-end, keep the 250 most-traded ASX stocks priced at $1+ with $2m+ median daily turnover and clean price history. ETFs are excluded.</p></li>
+      <li><h3>Score 22 strategy variants</h3><p>Risk-adjusted 12-month momentum, low volatility, a blend of both, and two TimesFM signals. Each uses 5 or 8 positions, with or without an All Ords 200-day trend filter.</p></li>
+      <li><h3>Trade slowly to cut costs</h3><p>Rebalance monthly. Buy only top-N names, keep them until they fall below rank 3N, never top up, and skip orders under $1,000.</p></li>
+      <li><h3>Prove it out of sample</h3><p>Pick the variant on 2016–2024 data, test it on the untouched 2024–2026 hold-out, and apply deflated Sharpe and overfitting checks. If anything fails, recommend the index ETF.</p></li>
     </ol>
   </section>
 
@@ -319,13 +405,14 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
 
     // grid + y ticks: 4 clean steps
     const step = niceStep((hi - lo) / 4);
+    const dec = Math.max(0, -Math.floor(Math.log10(step)));
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
       svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: css("--grid"), "stroke-width": 1 }));
-      const t = s("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }); t.textContent = o.yfmt(v); svg.append(t);
+      const t = s("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }); t.textContent = o.tickDecimals ? v.toFixed(dec) : o.yfmt(v); svg.append(t);
     }
     if (fin(o.baseline)) svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y(o.baseline), y2: y(o.baseline), stroke: css("--axis"), "stroke-width": 1 }));
     // x ticks: up to 5 evenly spaced dates
-    const xt = Math.min(5, n);
+    const xt = Math.max(2, Math.min(5, n, Math.floor((W - m.l - m.r) / 110) + 1));
     for (let k = 0; k < xt; k++) {
       const i = Math.round((k / Math.max(1, xt - 1)) * (n - 1));
       const t = s("text", { x: x(i), y: H - 4, "text-anchor": k === 0 ? "start" : k === xt - 1 ? "end" : "middle" });
@@ -459,7 +546,7 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
       const lead = Array(hist.length - 1).fill(null);
       requestAnimationFrame(() => lineChart(chart, {
         label: `${p.symbol}: last 60 closes and ${st.hold}-session TimesFM forecast`,
-        height: 150, yWidth: 48, dates, split: hist.length - 1,
+        height: 150, yWidth: 48, dates, split: hist.length - 1, tickDecimals: true,
         yfmt: (v) => v < 1 ? v.toFixed(3) : v.toFixed(2),
         series: [
           { label: "Close", color: css("--hist"), values: hist.concat(pad), endDot: false },
@@ -533,6 +620,249 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
     ]));
   }
 
+  // ---------- recommendation + strategy comparison (strategy v2) ----------
+  const TIER_TEXT = { LIVE: "LIVE strategy", PAPER: "Paper-tracking a candidate", FALLBACK: "Index ETF" };
+  function renderRec(d) {
+    const r = d.recommendation;
+    $("rec").hidden = !r;
+    if (!r) return;
+    const tier = r.tier || "FALLBACK";
+    $("rec-tier").className = `tier ${tier}`;
+    $("rec-tier-text").textContent = TIER_TEXT[tier] || tier;
+    $("rec-asof").textContent = r.as_of ? `As of ${fmtDate(r.as_of)}` : "";
+    $("rec-action").textContent = r.action_text || "";
+    const orders = d.orders_next_open || [];
+    $("rec-orders").hidden = !orders.length;
+    if (orders.length) {
+      $("rec-orders").replaceChildren(el("table", {}, [
+        el("thead", {}, el("tr", {}, ["Side", "Stock", "Shares", "Est. price", "Est. cost"].map((h, i) => el("th", { class: i > 1 ? "r" : "", text: h })))),
+        el("tbody", {}, orders.map((o) => el("tr", {}, [
+          el("td", { text: o.side }), el("td", { class: "mono", text: o.ticker }),
+          el("td", { class: "num r", text: String(o.shares) }), el("td", { class: "num r", text: price(o.est_price) }),
+          el("td", { class: "num r", text: money(o.est_cost) }),
+        ]))),
+      ]));
+    }
+    const reasons = r.reasons || [];
+    $("rec-reasons-box").hidden = !reasons.length || tier === "LIVE";
+    $("rec-reason-count").textContent = `(${reasons.length} test${reasons.length === 1 ? "" : "s"} failed)`;
+    $("rec-reasons").replaceChildren(...reasons.map((x) => el("li", { text: x })));
+  }
+
+  const CMP_COLS = [
+    ["id", "Strategy", (v) => v],
+    ["cagr", "CAGR", (v) => pct(v, 1)],
+    ["sharpe", "Sharpe", (v) => fin(v) ? v.toFixed(2) : "n/a"],
+    ["mdd", "Max DD", (v) => pct(v, 1)],
+    ["excess_vs_bench", "Excess vs VAS", null],
+    ["turnover", "Turnover", (v) => fin(v) ? `${v.toFixed(1)}×` : "—"],
+    ["orders_per_year", "Orders/yr", (v) => fin(v) ? v.toFixed(0) : "—"],
+    ["cost_drag", "Cost drag", (v) => fin(v) ? pct(v, 2).replace("+", "") : "—"],
+    ["hit_rate", "Months ahead", (v) => fin(v) ? `${Math.round(v * 100)}%` : "n/a"],
+  ];
+  const BASE_LABELS = { BENCH_TR: "VAS.AX buy-and-hold (benchmark)", AORD_PRICE: "^AORD price index (no dividends)", EW_UNIV: "Equal-weight universe (gross)", WF_SELECT: "Walk-forward selection" };
+  let cmpSort = { key: "sharpe", dir: -1 };
+  function renderCompare(d) {
+    const rows = d.strategy_comparison || [];
+    $("compare-sec").hidden = !rows.length;
+    if (!rows.length) return;
+    $("bench-note").textContent = d.benchmark_note || "";
+    const sel = $("cmp-setting");
+    if (!sel.options.length) {
+      const settings = [...new Set(rows.map((r) => r.setting))];
+      const label = (s) => { const [cap, core] = s.split("_core"); return `A$${Number(cap).toLocaleString("en-AU")}${Number(core) ? `, ${Math.round(core * 100)}% core ETF` : ", all stocks"}`; };
+      settings.forEach((s) => sel.append(el("option", { value: s, text: label(s) })));
+      const want = d.recommendation && d.recommendation.setting;
+      if (want && settings.includes(want)) sel.value = want;
+      sel.addEventListener("change", () => renderCompare(DATA));
+      $("cmp-period").addEventListener("change", () => renderCompare(DATA));
+    }
+    const period = $("cmp-period").value, setting = sel.value;
+    let view = rows.filter((r) => r.setting === setting && (r.period === period || (r.skipped_reason && !fin(r.cagr) && r.period === "full")));
+    view.sort((a, b) => {
+      const x = a[cmpSort.key], y = b[cmpSort.key];
+      if (cmpSort.key === "id") return cmpSort.dir * String(x).localeCompare(String(y));
+      return cmpSort.dir * ((fin(x) ? x : -Infinity) - (fin(y) ? y : -Infinity));
+    });
+    const head = el("tr", {}, CMP_COLS.map(([key, label], i) => {
+      const th = el("th", { class: `sortable${i ? " r" : ""}`, text: label, tabindex: "0", scope: "col" });
+      if (cmpSort.key === key) th.setAttribute("aria-sort", cmpSort.dir < 0 ? "descending" : "ascending");
+      const go = () => { cmpSort = { key, dir: cmpSort.key === key ? -cmpSort.dir : (key === "id" ? 1 : -1) }; renderCompare(DATA); };
+      th.addEventListener("click", go); th.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), go()));
+      return th;
+    }));
+    const body = view.map((r) => {
+      const skipped = r.skipped_reason && !fin(r.cagr);
+      const allPass = r.passes && Object.values(r.passes).every(Boolean);
+      const cls = [skipped ? "skip" : "", allPass ? "pass" : "", BASE_LABELS[r.id] ? "base" : ""].join(" ").trim();
+      const cells = CMP_COLS.map(([key, , fmt], i) => {
+        if (key === "id") {
+          const name = el("td", { text: BASE_LABELS[r.id] || strategyLabel(r.id), title: r.id });
+          if (r.is_frozen) name.append(el("span", { class: "badge", text: "SELECTED" }));
+          return name;
+        }
+        if (skipped) return i === 1 ? el("td", { colspan: String(CMP_COLS.length - 1), text: r.skipped_reason }) : null;
+        if (key === "excess_vs_bench") {
+          const ci = fin(r.excess_ci_lo) ? ` [${pct(r.excess_ci_lo, 1)}, ${pct(r.excess_ci_hi, 1)}]` : "";
+          return el("td", { class: "num r", text: r.id === "BENCH_TR" ? "—" : `${pct(r.excess_vs_bench, 1)}${ci}` });
+        }
+        return el("td", { class: "num r", text: fmt(r[key]) });
+      }).filter(Boolean);
+      return el("tr", { class: cls }, cells);
+    });
+    $("cmp-table").replaceChildren(el("table", {}, [el("thead", {}, head), el("tbody", {}, body)]));
+    renderValidation(d, setting);
+  }
+
+  function renderValidation(d, setting) {
+    const v = (d.validation_summary || {})[setting], ic = d.signal_ic || {};
+    const box = $("val-box"); box.replaceChildren();
+    if (v && v.frozen) {
+      const dsr = v.dsr_frozen || {}, pbo = v.pbo || {}, nb = v.neighbours || [], sv = v.survivorship || {};
+      box.append(el("div", { class: "val-card" }, [
+        el("h3", { text: "Overfitting checks for the selected variant" }),
+        el("dl", { class: "settings" }, [
+          ["Selected", `${v.frozen.variant} (chosen on data before Jul 2024)`],
+          ["Deflated Sharpe", fin(dsr.dsr) ? `${dsr.dsr.toFixed(2)} (needs ≥ 0.95, ${dsr.trials} trials)` : "n/a"],
+          ["Overfitting probability", fin(pbo.pbo) ? `${Math.round(pbo.pbo * 100)}% (needs ≤ 25%)` : "n/a"],
+          ["Neighbours that also win", `${nb.filter((n) => n.passes_a_wf).length} of ${nb.length} (needs 2)`],
+          ["Excess after 1.5% / 3% haircut", `${pct(sv.minus_1_5pct, 1)} / ${pct(sv.minus_3pct, 1)}`],
+          ["Walk-forward picks", (v.walk_forward_picks || []).map((p) => `${p.year}: ${p.variant}`).join(", ")],
+        ].flatMap(([k, x]) => [el("dt", { text: k }), el("dd", { text: x })])),
+      ]));
+    }
+    const sigs = Object.entries(ic);
+    if (sigs.length) {
+      box.append(el("div", { class: "val-card" }, [
+        el("h3", { text: "Does each signal predict next month?" }),
+        el("p", { class: "sub small", text: "Rank IC: correlation between this month's score and next month's return vs VAS. |t| above 2 suggests a real effect." }),
+        el("div", { class: "tbl-wrap" }, el("table", {}, [
+          el("thead", {}, el("tr", {}, ["Signal", "Mean IC", "t-stat", "Months +"].map((h, i) => el("th", { class: i ? "r" : "", text: h })))),
+          el("tbody", {}, sigs.map(([k, x]) => el("tr", {}, [
+            el("td", { class: "mono", text: k }), el("td", { class: "num r", text: fin(x.mean_ic) ? x.mean_ic.toFixed(3) : "n/a" }),
+            el("td", { class: "num r", text: fin(x.nw_t) ? x.nw_t.toFixed(2) : "n/a" }),
+            el("td", { class: "num r", text: fin(x.pct_positive) ? `${Math.round(x.pct_positive * 100)}%` : "n/a" }),
+          ]))),
+        ])),
+      ]));
+    }
+  }
+
+  // ---------- historical replay ----------
+  const SIGNAL_NAMES = { RAMOM: "Risk-adjusted momentum", COMBO: "Momentum + low-vol blend", LOWVOL: "Low volatility",
+    TFM_REL: "TimesFM (vs index)", TFM_RAW: "TimesFM (price)" };
+  function strategyLabel(id) {
+    const m = /^([A-Z_]+?)_N(\d+)_(reg|noreg)_B(\d+)(_SI)?/.exec(id || "");
+    if (!m) return id;
+    const parts = [SIGNAL_NAMES[m[1]] || m[1], `${m[2]} stocks`, m[3] === "reg" ? "trend filter" : "no trend filter"];
+    if (m[4] === "1") parts.push("no hold buffer");
+    if (m[5]) parts.push("short-interest screen");
+    return parts.join(" · ");
+  }
+  const settingLabel = (s) => { const [cap, core] = s.split("_core"); return `A$${Number(cap).toLocaleString("en-AU")}${Number(core) ? `, ${Math.round(core * 100)}% core ETF` : ", all stocks"}`; };
+  const HIST_SERIES = [
+    { key: "strategy", label: "Strategy", color: "--s1" },
+    { key: "BENCH_TR", label: "VAS (All Ords proxy, with dividends)", color: "--s2" },
+    { key: "EW_UNIV", label: "All screened stocks (equal weight)", color: "--s3" },
+    { key: "AORD_PRICE", label: "^AORD price index (no dividends)", color: "--s4" },
+  ];
+  let histInit = false;
+  function renderHistory(d) {
+    const h = d.history;
+    $("hist-sec").hidden = !h || !h.settings;
+    if (!h || !h.settings) return;
+    const selSet = $("h-setting"), selStrat = $("h-strat"), selStart = $("h-start");
+    const fillStrategies = () => {
+      const st = h.settings[selSet.value];
+      const frozen = (((d.validation_summary || {})[selSet.value] || {}).frozen || {}).variant;
+      const ids = Object.keys(st.strategies).sort((a, b) => strategyLabel(a).localeCompare(strategyLabel(b)));
+      selStrat.replaceChildren(...ids.map((id) => el("option", { value: id, text: (id === frozen ? "★ " : "") + strategyLabel(id) })));
+      if (frozen && ids.includes(frozen)) selStrat.value = frozen;
+      const years = [...new Set(st.dates.map((x) => x.slice(0, 4)))];
+      const keep = selStart.value;
+      selStart.replaceChildren(...years.map((y) => el("option", { value: y, text: y })));
+      if (years.includes(keep)) selStart.value = keep;
+    };
+    if (!histInit) {
+      histInit = true;
+      const settings = Object.keys(h.settings);
+      selSet.replaceChildren(...settings.map((x) => el("option", { value: x, text: settingLabel(x) })));
+      const want = d.recommendation && d.recommendation.setting;
+      if (want && settings.includes(want)) selSet.value = want;
+      fillStrategies();
+      selSet.addEventListener("change", () => { fillStrategies(); renderHistory(DATA); });
+      selStrat.addEventListener("change", () => renderHistory(DATA));
+      selStart.addEventListener("change", () => renderHistory(DATA));
+    }
+    const st = h.settings[selSet.value], strat = st.strategies[selStrat.value];
+    if (!strat) return;
+    const capital = Number(selSet.value.split("_core")[0]);
+    const i0 = Math.max(0, st.dates.findIndex((x) => x >= `${selStart.value}-01-01`));
+    const months = st.dates.slice(i0);
+    const rets = { strategy: strat.returns.slice(i0) };
+    for (const k of ["BENCH_TR", "EW_UNIV", "AORD_PRICE"]) rets[k] = (st.baselines[k] || []).slice(i0);
+    const grow = (r) => { let v = capital; return [capital, ...r.map((x) => (v *= 1 + (fin(x) ? x : 0)))]; };
+    const startDate = i0 > 0 ? st.dates[i0 - 1] : months[0];
+    const dates = [startDate, ...months];
+    const curves = Object.fromEntries(Object.entries(rets).map(([k, r]) => [k, grow(r)]));
+    const yrs = months.length / 12;
+    const cagr = (c) => Math.pow(c[c.length - 1] / capital, 1 / Math.max(yrs, 1 / 12)) - 1;
+    const mdd = (c) => { let peak = c[0], w = 0; for (const v of c) { peak = Math.max(peak, v); w = Math.min(w, v / peak - 1); } return w; };
+    const ahead = rets.strategy.filter((x, i) => fin(x) && fin(rets.BENCH_TR[i]) && x > rets.BENCH_TR[i]).length / Math.max(1, months.length);
+    const sEnd = curves.strategy.at(-1), bEnd = curves.BENCH_TR.at(-1);
+    $("h-kpis").replaceChildren(
+      tile(`A$${capital.toLocaleString("en-AU")} became`, money(sEnd), el("span", {}, [arrow(sEnd - bEnd), ` ${money(Math.abs(sEnd - bEnd))} ${sEnd >= bEnd ? "more" : "less"} than VAS (${money(bEnd)})`]), true),
+      tile("Yearly return", pct(cagr(curves.strategy), 1), el("span", { text: `VAS ${pct(cagr(curves.BENCH_TR), 1)}` })),
+      tile("Worst drop", pct(mdd(curves.strategy), 1), el("span", { text: `VAS ${pct(mdd(curves.BENCH_TR), 1)}` })),
+      tile("Months ahead of VAS", `${Math.round(ahead * 100)}%`, el("span", { text: `${months.length} months from ${fmtDate(startDate, { month: "short", year: "numeric" })}` })),
+    );
+    const series = HIST_SERIES.map((x) => ({ ...x, label: x.key === "strategy" ? strategyLabel(selStrat.value) : x.label }));
+    $("h-legend").replaceChildren(...series.map((x) => el("span", { class: "key" }, [el("i", { style: `background:${css(x.color)}` }), x.label])));
+    const kfmt = (v) => v >= 1e6 ? `$${(v / 1e6).toFixed(1)}m` : v >= 1e3 ? `$${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}k` : `$${v.toFixed(0)}`;
+    lineChart($("h-chart"), {
+      label: `Growth of A$${capital} for ${strategyLabel(selStrat.value)} vs VAS since ${startDate}`,
+      height: 320, dates, baseline: capital, endLabels: true, yWidth: 52, yfmt: kfmt,
+      series: series.map((x) => ({ label: x.label, color: css(x.color), values: curves[x.key] })),
+    });
+
+    // Year-by-year
+    const byYear = {};
+    months.forEach((m, i) => {
+      const y = m.slice(0, 4);
+      const row = byYear[y] || (byYear[y] = { n: 0, s: 1, b: 1, a: 1, last: m });
+      row.n++; row.last = m;
+      row.s *= 1 + (fin(rets.strategy[i]) ? rets.strategy[i] : 0);
+      row.b *= 1 + (fin(rets.BENCH_TR[i]) ? rets.BENCH_TR[i] : 0);
+      row.a *= 1 + (fin(rets.AORD_PRICE[i]) ? rets.AORD_PRICE[i] : 0);
+    });
+    const yRows = Object.entries(byYear).reverse().map(([y, r]) => {
+      const diff = r.s - r.b;
+      const label = r.n < 12 ? `${y} (${r.n} mo)` : y;
+      return el("tr", {}, [
+        el("td", { class: "num", text: label }), el("td", { class: "num r", text: pct(r.s - 1, 1) }),
+        el("td", { class: "num r", text: pct(r.b - 1, 1) }),
+        el("td", { class: "num r" }, [arrow(diff), ` ${diff >= 0 ? "+" : "−"}${Math.abs(diff * 100).toFixed(1)} pts`]),
+        el("td", { class: "num r", text: pct(r.a - 1, 1) }),
+      ]);
+    });
+    $("h-years").replaceChildren(el("table", {}, [
+      el("thead", {}, el("tr", {}, ["Year", "Strategy", "VAS", "Difference", "^AORD price"].map((x, i) => el("th", { class: i ? "r" : "", text: x })))),
+      el("tbody", {}, yRows),
+    ]));
+
+    // Month by month (newest first)
+    const mRows = months.map((m, i) => [m, i]).reverse().map(([m, i]) => el("tr", {}, [
+      el("td", { class: "num", text: fmtDate(m, { month: "short", year: "numeric" }) }),
+      el("td", { class: "num r", text: pct(rets.strategy[i], 1) }),
+      el("td", { class: "num r", text: pct(rets.BENCH_TR[i], 1) }),
+      el("td", { class: "mono", style: "white-space:normal;min-width:16ch", text: (strat.holdings.slice(i0)[i] || "cash").split(" ").join(", ") }),
+    ]));
+    $("h-months").replaceChildren(el("table", {}, [
+      el("thead", {}, el("tr", {}, ["Month", "Strategy", "VAS", "Held"].map((x, i) => el("th", { class: i && i < 3 ? "r" : "", text: x })))),
+      el("tbody", {}, mRows),
+    ]));
+  }
+
   function renderSettings(d) {
     const st = d.settings, f = st.filters;
     const items = [
@@ -552,9 +882,11 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
   const CMDS = [
     ["Install (Python 3.10+)", "pip install -r requirements.txt"],
     ["Download prices", "python stocktrade.py ingest"],
-    ["Tomorrow's picks", "python stocktrade.py tfm-recommend --capital 5000"],
+    ["Today's recommendation", "python stocktrade.py strat-recommend --capital 10000"],
+    ["Research grid + validation (slow)", "python stocktrade.py strat-backtest"],
+    ["Legacy TimesFM picks", "python stocktrade.py tfm-recommend --capital 5000"],
     ["Backtest any window", "python stocktrade.py tfm-backtest --start-date 2025-01-01 --top 5 --hold 5"],
-    ["Rebuild this page locally", "python stocktrade.py tfm-publish && python -m http.server -d docs"],
+    ["Rebuild this page locally", "python stocktrade.py tfm-publish && python stocktrade.py strat-recommend && python stocktrade.py strat-publish && python -m http.server -d docs"],
   ];
   function renderCmds() {
     $("cmds").replaceChildren(...CMDS.map(([lbl, cmd], i) => {
@@ -576,7 +908,10 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
   });
 
   let DATA = null;
-  function render(d) { renderHeader(d); renderPicks(d); renderPerf(d); renderTrades(d); renderSettings(d); }
+  function render(d) {
+    renderHeader(d); renderRec(d); renderCompare(d); renderHistory(d);
+    if (d.recommendations) { renderPicks(d); renderPerf(d); renderTrades(d); renderSettings(d); }
+  }
   renderCmds();
   fetch("data/latest.json", { cache: "no-cache" })
     .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })

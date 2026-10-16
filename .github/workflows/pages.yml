@@ -8,14 +8,14 @@ on:
     branches: [main, "claude/**"]
     paths:
       - "docs/**"
-      - "ml/timesfm_strategy.py"
+      - "ml/**"
       - "stocktrade.py"
       - "config.example.yaml"
       - "requirements.txt"
       - ".github/workflows/pages.yml"
 
 permissions:
-  contents: read
+  contents: write   # saves the append-only paper-tracking and delisting logs
   pages: write
   id-token: write
 
@@ -26,7 +26,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -46,11 +46,27 @@ jobs:
           key: timesfm-${{ github.run_id }}
           restore-keys: timesfm-
       - name: Self-check
-        run: python ml/test_timesfm_strategy.py
+        run: |
+          python ml/test_timesfm_strategy.py
+          python ml/test_strategy_v2.py
       - name: Download latest ASX prices
-        run: python stocktrade.py --log-level WARNING ingest
-      - name: Forecast, backtest and build dashboard data
-        run: python stocktrade.py tfm-publish --out docs/data/latest.json
+        run: time python stocktrade.py --log-level WARNING ingest
+      - name: Legacy weekly TimesFM picks and backtest
+        run: time python stocktrade.py tfm-publish --out docs/data/latest.json
+      - name: Today's recommendation (monthly strategy or index ETF)
+        run: time python stocktrade.py --log-level WARNING strat-recommend
+      - name: Merge strategy results into dashboard data
+        run: time python stocktrade.py strat-publish
+      - name: Save paper-tracking and delisting logs
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git add results/paper results/survivorship 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Daily paper-tracking and delisting log update [skip ci]"
+            git pull --rebase origin main && git push
+          fi
       - uses: actions/upload-pages-artifact@v4
         with:
           path: docs
