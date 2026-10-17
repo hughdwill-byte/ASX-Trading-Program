@@ -64,9 +64,16 @@ def build_context(orchestrator, cfg: dict) -> Context:
     symbols = list(dict.fromkeys(list(symbols) + [core, "A200"]))
     t0 = time.monotonic()
     panel = load_panel(orchestrator.ingestor, symbols)
-    if core not in panel["adj_close"].columns:  # the benchmark must exist; fetch it directly if a batch dropped it
+    for attempt in range(4):  # the benchmark must exist; fetch it directly if a batch dropped it (Yahoo rate-limits)
+        if core in panel["adj_close"].columns:
+            break
         orchestrator.ingestor.exclusions.pop(core, None)
-        orchestrator.ingestor.fetch_ohlcv(core, refresh=True)
+        try:
+            orchestrator.ingestor.fetch_ohlcv(core, refresh=True)
+        except ValueError as err:
+            logger.warning("Benchmark %s fetch attempt %d failed: %s", core, attempt + 1, err)
+            time.sleep(30 * (attempt + 1))
+            continue
         panel = load_panel(orchestrator.ingestor, symbols)
     if core not in panel["adj_close"].columns:
         raise ValueError(f"Benchmark ETF {core} could not be downloaded; cannot run strategy research.")
