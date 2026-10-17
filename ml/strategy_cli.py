@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from ml import validation as val
-from ml.portfolio import DEFAULTS, Variant, build_rank_cache, ew_universe, run_backtest_v2
+from ml.portfolio import DEFAULTS, Variant, after_tax_monthly, build_rank_cache, ew_universe, run_backtest_v2
 from ml.signals import TRADEABLE_SIGNALS, Context, tfm_cache_scores
 from ml.timesfm_strategy import load_benchmark, load_panel
 from stocktrade import project_path, sanitize_for_json
@@ -78,8 +78,43 @@ def build_context(orchestrator, cfg: dict) -> Context:
         si = data_asic.load_si(asic_dir, cfg["asic_lag_days"])
     ctx = Context(panel, aord, cfg, tfm_dir=project_path(str(config.data.base_path), "tfm_cache"), asic=si)
     ctx.asic_coverage = cov
+    # Stocks only: drop ETFs and managed funds that ever pass the liquidity filters.
+    candidates = [t for t in ctx.base.columns if ctx.base[t].any()]
+    types = instrument_types(candidates, RESULTS / "instrument_types.json")
+    funds = sorted(t for t in candidates if types.get(t, "EQUITY") != "EQUITY")
+    ctx.base.loc[:, funds] = False
+    logger.info("Excluded %d ETFs/funds: %s", len(funds), " ".join(funds))
     logger.info("Context: %d tickers x %d days in %.1fs", ctx.A.shape[1], ctx.A.shape[0], time.monotonic() - t0)
     return ctx
+
+
+def _yahoo_instrument_type(ticker: str) -> Optional[str]:
+    import yfinance as yf
+
+    for attempt in range(3):
+        try:
+            kind = yf.Ticker(f"{ticker}.AX").get_history_metadata().get("instrumentType")
+            if kind:
+                return str(kind)
+        except Exception as err:  # network or rate limit
+            logger.debug("instrumentType %s attempt %d: %s", ticker, attempt + 1, err)
+        time.sleep(2 * (attempt + 1))
+    return None
+
+
+def instrument_types(tickers, path: pathlib.Path, fetch=_yahoo_instrument_type) -> Dict[str, str]:
+    """Yahoo instrument type (EQUITY, ETF, MUTUALFUND...) per ticker, cached in `path`; lookups that fail are retried next run."""
+    cache = json.loads(path.read_text()) if path.exists() else {}
+    missing = [t for t in tickers if t not in cache]
+    for t in missing:
+        kind = fetch(t)
+        if kind:
+            cache[t] = kind
+    if missing:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(dict(sorted(cache.items())), indent=0))
+        logger.info("Instrument types: looked up %d, %d still unknown", len(missing), sum(t not in cache for t in missing))
+    return cache
 
 
 def run_cli(args, orchestrator) -> int:
@@ -245,17 +280,18 @@ def strat_backtest(ctx: Context, cfg: dict, args) -> int:
                     if row["period"] == "walk_forward"]
 
     _write_compare(compare)
-    _write_history(per_setting, aord_m, ew_m)
+    _write_history(per_setting, aord_m, ew_m, cfg.get("tax_rate", 0.0))
     (RESULTS / "validation.json").write_text(json.dumps(sanitize_for_json(validation), indent=1))
     logger.info("strat-backtest finished in %.1f min", (time.time() - run_start) / 60)
     _print_summary(compare, validation, cfg)
     return 0
 
 
-def _write_history(per_setting: Dict[str, dict], aord_m: pd.Series, ew_m: pd.Series) -> None:
+def _write_history(per_setting: Dict[str, dict], aord_m: pd.Series, ew_m: pd.Series, tax_rate: float) -> None:
     """Month-by-month net returns and holdings for every variant, so the dashboard can replay any start date."""
     out = {"note": "Monthly net returns after brokerage and slippage; holdings are what each strategy held "
-                   "during the month ending on that date.", "settings": {}}
+                   "during the month ending on that date. returns_after_tax also deducts estimated capital "
+                   "gains tax at tax_rate.", "tax_rate": tax_rate, "settings": {}}
     for setting, data in per_setting.items():
         dates = data["bench_m"].index
         ser = lambda m: [round(float(x), 6) if pd.notna(x) else None for x in m.reindex(dates)]
@@ -263,10 +299,12 @@ def _write_history(per_setting: Dict[str, dict], aord_m: pd.Series, ew_m: pd.Ser
         for vid, r in data["results"].items():
             held = r["books"].shift(1).reindex(dates)  # decided at the previous month-end, held through this month
             strategies[vid] = {"returns": ser(r["monthly"]),
+                               "returns_after_tax": ser(after_tax_monthly(r, tax_rate)),
                                "holdings": [h if isinstance(h, str) else "" for h in held]}
         out["settings"][setting] = {
             "dates": [d.date().isoformat() for d in dates],
-            "baselines": {"BENCH_TR": ser(data["bench_m"]), "AORD_PRICE": ser(aord_m), "EW_UNIV": ser(ew_m)},
+            "baselines": {"BENCH_TR": ser(data["bench_m"]), "AORD_PRICE": ser(aord_m), "EW_UNIV": ser(ew_m),
+                          "BENCH_TR_AFTER_TAX": ser(after_tax_monthly(data["bench"], tax_rate))},
             "strategies": strategies,
         }
     (RESULTS / "history.json").write_text(json.dumps(out, separators=(",", ":")))
