@@ -16,7 +16,7 @@ import pandas as pd
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from ml import validation as val  # noqa: E402
-from ml.portfolio import DEFAULTS, Variant, run_backtest_v2, update_regime  # noqa: E402
+from ml.portfolio import DEFAULTS, Variant, after_tax_monthly, run_backtest_v2, update_regime  # noqa: E402
 from ml.signals import Context, zscore  # noqa: E402
 
 CFG = dict(DEFAULTS, min_mdv60=0.0, exclude_tickers=[], min_history_days=260, start="2016-01-29")
@@ -213,6 +213,34 @@ def test_publish_and_page():
     html = pathlib.Path(__file__).resolve().parents[1].joinpath("docs", "index.html").read_text()
     assert 'id="compare-sec"' in html and 'id="rec"' in html
     assert "d.strategy_comparison || []" in html and "const r = d.recommendation;" in html
+
+
+def test_after_tax_and_fund_filter():
+    months = pd.date_range("2020-06-30", "2022-12-31", freq="ME")
+    d = pd.Timestamp
+    orders = pd.DataFrame([
+        {"date": d("2020-07-01"), "ticker": t, "side": "BUY", "shares": 100, "price": 10.0} for t in "XYZ"] + [
+        {"date": d("2020-12-01"), "ticker": "X", "side": "SELL", "shares": 100, "price": 15.0},  # +500 short
+        {"date": d("2021-01-04"), "ticker": "Y", "side": "SELL", "shares": 100, "price": 6.0},   # -400 loss
+        {"date": d("2021-08-02"), "ticker": "Z", "side": "SELL", "shares": 50, "price": 30.0},   # +1000 long
+    ])
+    res = {"monthly": pd.Series(0.01, index=months), "orders": orders, "equity": pd.Series(1e5, index=months)}
+    out = after_tax_monthly(res, 0.32)
+    expect = pd.Series(0.01, index=months)
+    expect[d("2021-10-31")] = 1.01 * (1 - 0.32 * 100 / 1e5) - 1        # FY21: (500 - 400) taxed in full
+    expect[d("2022-10-31")] = 1.01 * (1 - 0.32 * 1000 / 2 / 1e5) - 1    # FY22: discounted long gain
+    assert np.allclose(out.values, expect.values), out[out != 0.01]
+    assert after_tax_monthly(res, 0.0).equals(res["monthly"])
+
+    from ml.strategy_cli import instrument_types
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "types.json"
+        path.write_text(json.dumps({"IVV": "ETF"}))
+        asked = []
+        fake = lambda t: asked.append(t) or {"BHP": "EQUITY"}.get(t)
+        types = instrument_types(["IVV", "BHP", "ZZZ"], path, fetch=fake)
+        assert asked == ["BHP", "ZZZ"] and types == {"IVV": "ETF", "BHP": "EQUITY"}
+        assert json.loads(path.read_text()) == types  # unknown ZZZ is retried next run, not cached
 
 
 if __name__ == "__main__":

@@ -255,6 +255,7 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
       <label>Capital <select id="h-setting"></select></label>
       <label>Strategy <select id="h-strat"></select></label>
       <label>Starting <select id="h-start"></select></label>
+      <label id="h-tax-l" hidden>Tax <select id="h-tax"><option value="pre">Before tax</option><option value="post">After tax (est.)</option></select></label>
     </div>
     <div class="kpis" id="h-kpis"></div>
     <div class="card">
@@ -267,7 +268,9 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
       <summary>What it held each month</summary>
       <div class="tbl-wrap" id="h-months"></div>
     </details>
-    <p class="sub small">Backtest on today's listed companies only: firms that later collapsed or delisted are missing, so these results are better than real trading would have been.</p>
+    <p class="sub small">Backtest on today's listed companies only: firms that later collapsed or delisted are missing, so these results are better than real trading would have been.
+      "After tax (est.)" deducts capital gains tax on each sale at your marginal rate (50% discount after 12 months, losses offset gains);
+      VAS is held throughout so it pays none. Dividend tax and franking are ignored for both. A rough guide, not tax advice.</p>
   </section>
 
   <section class="sec" aria-labelledby="picks-h">
@@ -793,14 +796,21 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
       selSet.addEventListener("change", () => { fillStrategies(); renderHistory(DATA); });
       selStrat.addEventListener("change", () => renderHistory(DATA));
       selStart.addEventListener("change", () => renderHistory(DATA));
+      $("h-tax").addEventListener("change", () => renderHistory(DATA));
+      if (h.tax_rate) $("h-tax").options[1].text = `After tax (est., ${Math.round(h.tax_rate * 100)}% rate)`;
     }
     const st = h.settings[selSet.value], strat = st.strategies[selStrat.value];
     if (!strat) return;
     const capital = Number(selSet.value.split("_core")[0]);
     const i0 = Math.max(0, st.dates.findIndex((x) => x >= `${selStart.value}-01-01`));
     const months = st.dates.slice(i0);
-    const rets = { strategy: strat.returns.slice(i0) };
-    for (const k of ["BENCH_TR", "EW_UNIV", "AORD_PRICE"]) rets[k] = (st.baselines[k] || []).slice(i0);
+    $("h-tax-l").hidden = !strat.returns_after_tax;
+    const taxed = $("h-tax").value === "post" && !!strat.returns_after_tax;
+    const rets = { strategy: (taxed ? strat.returns_after_tax : strat.returns).slice(i0) };
+    for (const k of ["BENCH_TR", "EW_UNIV", "AORD_PRICE"]) {
+      const key = taxed && k === "BENCH_TR" && st.baselines.BENCH_TR_AFTER_TAX ? "BENCH_TR_AFTER_TAX" : k;
+      rets[k] = (st.baselines[key] || []).slice(i0);
+    }
     const grow = (r) => { let v = capital; return [capital, ...r.map((x) => (v *= 1 + (fin(x) ? x : 0)))]; };
     const startDate = i0 > 0 ? st.dates[i0 - 1] : months[0];
     const dates = [startDate, ...months];

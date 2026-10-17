@@ -39,8 +39,10 @@ deploy on `main`. Total ~13 min cold.
 
 ## Deviations from the spec
 
-1. **ETF exclusion** uses the config list `exclude_tickers` only (seeded with STW and SFY, the only ETFs
-   found in `available_symbols.json`, plus VAS and A200). Fetching Yahoo `quoteType` would add ~1,850 API calls a run.
+1. **ETF exclusion**: `exclude_tickers` plus a Yahoo `instrumentType` lookup for every ticker that ever passes the
+   liquidity filters (anything not EQUITY is dropped). Results are cached in `results/instrument_types.json`, so only
+   new tickers are looked up. (The first version relied on the config list alone and let IVV, IOO, IAA, IEM, MVW and
+   QOZ into the universe.)
 2. **Presence test** (A on 95% of the last 252 sessions) uses the panel's own trading calendar
    (days when at least 30% of the usual number of stocks traded) rather than the ^AORD calendar.
 3. **ASIC URL**: the ASIC index page could not be inspected from the development sandbox (network blocked).
@@ -67,6 +69,10 @@ deploy on `main`. Total ~13 min cold.
     the user's real holdings.
 13. `results/frozen_choice.json` is deleted and re-written each research run; the hold-out gate checks that the file
     predates every hold-out evaluation in that run.
+
+14. **After-tax estimate** (`after_tax_monthly`): FIFO lots, losses offset non-discount gains first, 50% discount
+    after 12 months, tax paid each 31 October at `tax_rate` (default 32%). Dividend tax and franking are ignored for
+    both the strategies and VAS. Shown as a toggle on the dashboard; not used for selection or validation.
 
 ## Persistence
 

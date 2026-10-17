@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+from collections import defaultdict, deque
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -27,6 +28,7 @@ DEFAULTS = {
     "asic_lag_days": 4, "universe_size": 250, "min_history_days": 300, "min_presence": 0.95,
     "min_price": 1.00, "min_mdv60": 2_000_000.0, "max_zero_volume_days": 2, "max_daily_move": 2.0,
     "exclude_tickers": ["STW", "SFY", "A200", "VAS"], "start": "2016-03-31",
+    "tax_rate": 0.32,  # marginal rate for the after-tax estimate (30% bracket + 2% Medicare levy)
 }
 
 
@@ -273,6 +275,57 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
         "skipped_reason": skipped_reason, "final_book": {**shares, core: core_sh + regime_etf},
         "regime_on": regime_on,
     }
+
+
+def after_tax_monthly(res: Dict[str, object], rate: float) -> pd.Series:
+    """Monthly returns after an estimate of Australian capital gains tax on realised gains.
+
+    FIFO lots per ticker; capital losses (current and carried forward) offset non-discount gains first;
+    the 50% discount applies to what remains of gains on lots held over 12 months. Each financial
+    year's tax is paid at the first month-end on or after 31 October following it (or the last month
+    if the data ends first), as a fraction of equity so later returns compound on the smaller balance.
+    ponytail: ignores dividend tax and franking (adjusted prices fold dividends into gains), brokerage
+    in the cost base and personal circumstances; a rough guide, not tax advice.
+    """
+    monthly: pd.Series = res["monthly"]
+    orders: pd.DataFrame = res["orders"]
+    if not rate or orders.empty or monthly.empty:
+        return monthly.copy()
+    lots: Dict[str, deque] = defaultdict(deque)
+    fy_parts: Dict[int, List[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])  # short gain, long gain, loss
+    for o in orders.sort_values("date", kind="stable").itertuples(index=False):
+        if o.side == "BUY":
+            lots[o.ticker].append([int(o.shares), float(o.price), o.date])
+            continue
+        qty, fy = int(o.shares), o.date.year + (o.date.month >= 7)
+        while qty > 0 and lots[o.ticker]:
+            lot = lots[o.ticker][0]
+            q = min(qty, lot[0])
+            gain = q * (float(o.price) - lot[1])
+            if gain < 0:
+                fy_parts[fy][2] -= gain
+            else:
+                fy_parts[fy][1 if (o.date - lot[2]).days > 365 else 0] += gain
+            lot[0] -= q
+            qty -= q
+            if not lot[0]:
+                lots[o.ticker].popleft()
+    frac = pd.Series(0.0, index=monthly.index)
+    carry = 0.0
+    for fy in sorted(fy_parts):
+        short, long_, loss = fy_parts[fy]
+        loss += carry
+        used = min(loss, short)
+        short, loss = short - used, loss - used
+        used = min(loss, long_)
+        long_, carry = long_ - used, loss - used
+        tax = rate * (short + long_ / 2)
+        if tax <= 0:
+            continue
+        due = monthly.index[monthly.index >= pd.Timestamp(fy, 10, 31)]
+        when = due[0] if len(due) else monthly.index[-1]
+        frac[when] = 1 - (1 - frac[when]) * (1 - tax / float(res["equity"].loc[when]))
+    return (1 + monthly) * (1 - frac) - 1
 
 
 def ew_universe(ctx: Context, cfg: dict, end: Optional[str] = None) -> pd.Series:

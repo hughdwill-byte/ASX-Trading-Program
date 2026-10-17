@@ -48,5 +48,6 @@ strategy:                    # monthly cost-aware strategy (strat-* commands); s
   min_mdv60: 2000000         # minimum 60-day median dollar turnover
   max_zero_volume_days: 2    # in the last 20 sessions
   max_daily_move: 2.0        # reject series with a >200% one-day move in the last year (bad data)
-  exclude_tickers: [STW, SFY, A200, VAS]  # ETFs found in the symbol list (from the ASX company directory)
+  exclude_tickers: [STW, SFY, A200, VAS]  # always excluded; other ETFs/funds are found via Yahoo (results/instrument_types.json)
+  tax_rate: 0.32             # marginal rate for the after-tax estimate (30% bracket + 2% Medicare levy)
   start: "2016-03-31"        # first decision date
