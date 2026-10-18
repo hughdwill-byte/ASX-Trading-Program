@@ -657,6 +657,7 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
     ["cagr", "CAGR", (v) => pct(v, 1)],
     ["sharpe", "Sharpe", (v) => fin(v) ? v.toFixed(2) : "n/a"],
     ["mdd", "Max DD", (v) => pct(v, 1)],
+    ["cagr_after_tax", "After tax", (v) => pct(v, 1)],
     ["excess_vs_bench", "Excess vs VAS", null],
     ["turnover", "Turnover", (v) => fin(v) ? `${v.toFixed(1)}×` : "—"],
     ["orders_per_year", "Orders/yr", (v) => fin(v) ? v.toFixed(0) : "—"],
@@ -757,11 +758,13 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
   const SIGNAL_NAMES = { RAMOM: "Risk-adjusted momentum", COMBO: "Momentum + low-vol blend", LOWVOL: "Low volatility",
     TFM_REL: "TimesFM (vs index)", TFM_RAW: "TimesFM (price)" };
   function strategyLabel(id) {
-    const m = /^([A-Z_]+?)_N(\d+)_(reg|noreg)_B(\d+)(_SI)?/.exec(id || "");
+    const m = /^([A-Z_]+?)_N(\d+)_(reg|noreg)_B(\d+)(_SI)?(_Q)?(_TAX)?/.exec(id || "");
     if (!m) return id;
     const parts = [SIGNAL_NAMES[m[1]] || m[1], `${m[2]} stocks`, m[3] === "reg" ? "trend filter" : "no trend filter"];
     if (m[4] === "1") parts.push("no hold buffer");
     if (m[5]) parts.push("short-interest screen");
+    if (m[6]) parts.push("quarterly");
+    if (m[7]) parts.push("tax-aware");
     return parts.join(" · ");
   }
   const settingLabel = (s) => { const [cap, core] = s.split("_core"); return `A$${Number(cap).toLocaleString("en-AU")}${Number(core) ? `, ${Math.round(core * 100)}% core ETF` : ", all stocks"}`; };

@@ -186,6 +186,9 @@ def grid(signals_available: List[str], si_ok: bool) -> List[Variant]:
     vs = [Variant(signal=s, n=n, regime=r) for s in TRADEABLE_SIGNALS for n in (5, 8) for r in (False, True)]
     vs.append(Variant(signal="RAMOM", n=5, regime=False, buffer_mult=1))
     vs.append(Variant(signal="RAMOM", n=5, regime=True, si_screen=True))
+    for n, b in ((5, 1), (8, 3)):
+        vs += [Variant(signal="RAMOM", n=n, regime=False, buffer_mult=b, rebalance=q, tax_aware=t)
+               for q, t in (("Q", False), ("M", True), ("Q", True))]
     return vs
 
 
@@ -193,12 +196,15 @@ TRADING_FIELDS = ("turnover", "orders_per_year", "brokerage_drag", "slippage_dra
                   "avg_holding_days", "pct_disposals_lt_365")
 
 
-def _period_rows(result, bench_m, ew_m, label, setting, extra=None, engine=True) -> List[dict]:
+def _period_rows(result, bench_m, ew_m, label, setting, extra=None, engine=True, tax_rate=0.0) -> List[dict]:
     rows = []
+    after_tax = dict(result, monthly=after_tax_monthly(result, tax_rate)) if engine else None
     for period in val.PERIODS:
         m = val.metrics(result, bench_m, ew_m, period)
         if not engine:  # index / universe / selection series have no orders of their own
             m.update({k: None for k in TRADING_FIELDS if k in m})
+        if engine:
+            m["cagr_after_tax"] = val.metrics(after_tax, bench_m, ew_m, period).get("cagr")
         rows.append({"id": label, "setting": setting, "period": period, **(extra or {}), **m})
     return rows
 
@@ -234,7 +240,8 @@ def strat_backtest(ctx: Context, cfg: dict, args) -> int:
         setting = f"{int(capital)}_core{core_w:g}"
         bench = run_backtest_v2(ctx, Variant(core_weight=1.0, capital=capital), cfg, ranks, end)
         bench_m = bench["monthly"]
-        compare += _period_rows(bench, bench_m, ew_m, "BENCH_TR", setting, {"label": "VAS.AX buy-and-hold (total return)"})
+        compare += _period_rows(bench, bench_m, ew_m, "BENCH_TR", setting, {"label": "VAS.AX buy-and-hold (total return)"},
+                              tax_rate=cfg.get("tax_rate", 0.0))
         for label, m in (("AORD_PRICE", aord_m), ("EW_UNIV", ew_m)):
             fake = {"monthly": m, "equity": (1 + m).cumprod() * capital, "orders": pd.DataFrame(columns=[
                 "date", "side", "value", "brokerage", "slippage"]), "holdings": [], "positions": []}
@@ -256,7 +263,7 @@ def strat_backtest(ctx: Context, cfg: dict, args) -> int:
             r = run_backtest_v2(ctx, v, cfg, ranks, end)
             results[v.id] = r
             extra = {**_variant_fields(v), "skipped_reason": r["skipped_reason"]}
-            compare += _period_rows(r, bench_m, ew_m, v.id, setting, extra)
+            compare += _period_rows(r, bench_m, ew_m, v.id, setting, extra, tax_rate=cfg.get("tax_rate", 0.0))
             trials.append({"setting": setting, "variant": v.id, "config_hash": v.config_hash(),
                            "sharpe_full": val.sharpe(r["monthly"]), "timestamp": run_start})
         per_setting[setting] = {"results": results, "bench": bench, "bench_m": bench_m}
