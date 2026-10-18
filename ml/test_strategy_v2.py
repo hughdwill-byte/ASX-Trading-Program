@@ -136,6 +136,48 @@ def test_min_parcel():
     assert abs(r["costs"]["brokerage"] - 3.0 * len(r["orders"])) < 1e-9
 
 
+def _tax_ctx(final_px):
+    idx = pd.bdate_range("2016-01-01", periods=560)
+    adj = pd.DataFrame({f"T{i:02d}": 10.0 for i in range(10)} | {"VAS": 50.0}, index=idx)
+    adj.iloc[200:, 0] = final_px  # T00 moves after entry (~row 71)
+    cfg = dict(CFG, min_history_days=1, min_presence=0.0, start=str(idx[70].date()))
+    return Context(panel_from(adj, volume=5e5), None, cfg), cfg
+
+
+def _t00_sale(final_px, tax_aware):
+    ctx, cfg = _tax_ctx(final_px)
+    rows = ctx.decision_rows(cfg["start"])
+    names = [f"T{i:02d}" for i in range(10)]
+    bad = ["T05", "T06", "T07", "T08", "T00", "T01", "T02", "T09", "T03", "T04"]  # T00 rank 5, outside K=3
+    entry = ctx.dates[rows[0] + 1]
+    rc = {("RAMOM", i): ranks_series(bad if (ctx.dates[i + 1] - entry).days >= 330 else names) for i in rows}
+    v = Variant(n=3, regime=False, buffer_mult=1, capital=9000, tax_aware=tax_aware)
+    o = run_backtest_v2(ctx, v, cfg, rc)["orders"]
+    sells = o[(o["ticker"] == "T00") & (o["side"] == "SELL")]
+    return None if sells.empty else (sells.iloc[0]["date"] - entry).days
+
+
+def test_tax_aware_deferral():
+    assert Variant(rebalance="Q", tax_aware=True).id == "RAMOM_N5_reg_B3_Q_TAX"
+    plain = _t00_sale(12.0, False)
+    assert 330 <= plain < 365                      # rank sell as soon as T00 falls outside K
+    held = _t00_sale(12.0, True)                   # in profit, 330-364 days: deferred
+    assert held is not None and held >= 365
+    assert _t00_sale(8.0, True) == plain           # at a loss: sold immediately
+
+
+def test_quarterly_only_trades_in_quarter_months():
+    ctx, cfg = flat_ctx(days=400)
+    rows = ctx.decision_rows(cfg["start"])
+    names = [f"T{i:02d}" for i in range(10)]
+    rc = {("RAMOM", i): ranks_series(names[k % 3:] + names[:k % 3]) for k, i in enumerate(rows)}
+    v = Variant(n=3, regime=False, buffer_mult=1, capital=9000, rebalance="Q")
+    r = run_backtest_v2(ctx, v, cfg, rc)
+    ok = {ctx.dates[i + 1] for i in rows if ctx.dates[i].month in (3, 6, 9, 12)}
+    assert len(r["orders"]) and set(r["orders"]["date"]) <= ok
+    assert len(r["monthly"]) == len(rows) - 1      # snapshots stay monthly
+
+
 def test_regime():
     s = None
     s = update_regime(s, 101, 100, 0.02)   # initial: above SMA -> ON

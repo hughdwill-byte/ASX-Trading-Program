@@ -29,6 +29,7 @@ DEFAULTS = {
     "asic_lag_days": 4, "universe_size": 250, "min_history_days": 300, "min_presence": 0.95,
     "min_price": 1.00, "min_mdv60": 2_000_000.0, "max_zero_volume_days": 2, "max_daily_move": 2.0,
     "exclude_tickers": ["STW", "SFY", "A200", "VAS"], "start": "2016-03-31",
+    "tax_defer_days": 35, "tax_defer_exit_pct": 0.8, "tax_defer_max_dd": 0.15,
     "tax_rate": 0.32,  # marginal rate for the after-tax estimate (30% bracket + 2% Medicare levy)
 }
 
@@ -43,12 +44,18 @@ class Variant:
     capital: float = 10000.0
     si_screen: bool = False
     slip_mult: float = 1.0
+    rebalance: str = "M"       # "Q": trade only on March/June/September/December decisions
+    tax_aware: bool = False    # defer rank sells of winners held 330-364 days (50% CGT discount)
 
     @property
     def id(self) -> str:
         tag = f"{self.signal}_N{self.n}_{'reg' if self.regime else 'noreg'}_B{self.buffer_mult}"
         if self.si_screen:
             tag += "_SI"
+        if self.rebalance == "Q":
+            tag += "_Q"
+        if self.tax_aware:
+            tag += "_TAX"
         if self.slip_mult != 1.0:
             tag += f"_slipx{self.slip_mult:g}"
         return tag
@@ -125,6 +132,7 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
     regime_etf = 0                       # satellite slice parked in the core ETF while regime is OFF
     core_sh = 0
     entry: Dict[str, pd.Timestamp] = {}
+    entry_px: Dict[str, float] = {}
     inelig: Dict[str, int] = {}
     orders: List[dict] = []
     holds: List[dict] = []
@@ -186,6 +194,7 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
             regime_on = update_regime(regime_on, float(p.iloc[-1]), float(sma), cfg["regime_band"])
         on = True if not v.regime or regime_on is None else regime_on
 
+        trade_month = v.rebalance != "Q" or ctx.dates[i].month in (3, 6, 9, 12)
         if n_eff:
             ranks = rank_cache[(v.signal, i)] if rank_cache is not None else ctx.ranks(v.signal, i)
             elig = set(ranks.index)
@@ -197,8 +206,14 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
                 rank = ranks.get(t, np.inf)
                 reason = ("stale" if stale else "regime_off" if not on else "rank" if rank > K
                           else "ineligible" if inelig[t] >= 2 else "")
+                if not trade_month and not stale:
+                    continue
                 if not reason:
                     continue
+                if (v.tax_aware and reason == "rank" and 365 - cfg["tax_defer_days"] <= (ctx.dates[j] - entry[t]).days < 365
+                        and px_i[t] > entry_px[t] and rank <= cfg["tax_defer_exit_pct"] * len(ranks)
+                        and px_i[t] >= entry_px[t] * (1 - cfg["tax_defer_max_dd"])):
+                    continue  # defer: a winner a few weeks short of the 12-month CGT discount
                 slip = slippage(cfg, float(ctx.MDV60.iloc[i].get(t, 0) or 0)) * v.slip_mult
                 if stale:
                     px = float(px_i[t]) * (1 - cfg["stale_haircut"])
@@ -206,13 +221,16 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
                 else:
                     cash["sat"] += trade(j, t, "SELL", shares[t], "sat", slip, reason=reason)
                 holds.append({"ticker": t, "entry": entry.pop(t), "exit": ctx.dates[j]})
+                entry_px.pop(t, None)
                 del shares[t]
                 inelig.pop(t, None)
 
             sat_value = cash["sat"] + sum(shares[t] * px_i[t] for t in shares) + regime_etf * px_i[core]
             target = sat_value / n_eff
 
-            if not on:
+            if not trade_month:
+                pass
+            elif not on:
                 if cash["sat"] >= min_order:
                     regime_etf += buy_amount(j, core, cash["sat"], "sat", etf_slip, "regime_off")
             else:
@@ -240,6 +258,7 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
                     if qty:
                         shares[t] = qty
                         entry[t] = ctx.dates[j]
+                        entry_px[t] = orders[-1]["price"]
                         inelig[t] = 0
 
         # Core/satellite rebalance: June decision executes on the first trading day of July.

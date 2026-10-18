@@ -38,6 +38,9 @@ strategy:                    # monthly cost-aware strategy (strat-* commands); s
   slippage_tiers: {high: 0.0010, mid: 0.0025, low: 0.0050, etf: 0.0005}  # per side, by MDV60 tier
   slippage_mdv_high: 10000000  # MDV60 at or above this uses the high-liquidity tier
   slippage_mdv_mid: 2000000    # MDV60 at or above this uses the mid tier
+  tax_defer_days: 35         # tax-aware variants defer rank sells of winners held 330-364 days
+  tax_defer_exit_pct: 0.8    # ...unless the name ranks in the bottom 20%
+  tax_defer_max_dd: 0.15     # ...or has fallen more than 15% from its entry price
   cost_stress_mult: 2.0      # slippage multiplier for the cost-stress test
   stale_days: 10             # exit a holding with no price for this many trading days
   stale_haircut: 0.30        # exit stale holdings at last close x (1 - haircut)
