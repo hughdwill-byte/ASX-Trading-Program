@@ -16,10 +16,10 @@ import pandas as pd
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from ml import validation as val  # noqa: E402
-from ml.portfolio import DEFAULTS, Variant, after_tax_monthly, run_backtest_v2, update_regime  # noqa: E402
+from ml.portfolio import brokerage_fee, DEFAULTS, Variant, after_tax_monthly, run_backtest_v2, update_regime  # noqa: E402
 from ml.signals import Context, zscore  # noqa: E402
 
-CFG = dict(DEFAULTS, min_mdv60=0.0, exclude_tickers=[], min_history_days=260, start="2016-01-29")
+CFG = dict(DEFAULTS, broker="flat", min_position=2500.0, min_order=1000.0, min_mdv60=0.0, exclude_tickers=[], min_history_days=260, start="2016-01-29")
 
 
 def panel_from(adj: pd.DataFrame, volume: float = 1e6, opens=None):
@@ -114,6 +114,26 @@ def test_buffer_and_costs():
     # min_order: nothing is bought when every order would be below it
     r2 = run_backtest_v2(ctx, v, dict(cfg, min_order=5000), rc)
     assert (r2["orders"]["side"] != "BUY").all() if len(r2["orders"]) else True
+
+
+def test_broker_fees():
+    for v, flat, stake, cmc_buy, cmc_sell in [(500, 6.5, 3, 0, 11), (1000, 6.5, 3, 0, 11), (1001, 6.5, 3, 11, 11),
+                                              (30000, 6.5, 3, 30, 30), (40000, 6.5, 4, 40, 40)]:
+        for broker, buy, sell in (("flat", flat, flat), ("stake", stake, stake), ("cmc", cmc_buy, cmc_sell)):
+            c = {"broker": broker, "brokerage": 6.5}
+            assert abs(brokerage_fee(c, "BUY", v) - buy) < 1e-9 and abs(brokerage_fee(c, "SELL", v) - sell) < 1e-9, (broker, v)
+
+
+def test_min_parcel():
+    ctx, cfg = flat_ctx()
+    cfg = dict(cfg, broker="stake", min_position=500.0, min_order=500.0, min_parcel=500.0)
+    rows = ctx.decision_rows(cfg["start"])
+    rc = {("RAMOM", i): ranks_series([f"T{k:02d}" for k in range(10)]) for i in rows}
+    r = run_backtest_v2(ctx, Variant(n=5, regime=False, capital=2000), cfg, rc)
+    assert r["n_eff"] == 4
+    buys = r["orders"][r["orders"]["side"] == "BUY"]
+    assert len(buys) and (buys["value"] >= 500).all()
+    assert abs(r["costs"]["brokerage"] - 3.0 * len(r["orders"])) < 1e-9
 
 
 def test_regime():
