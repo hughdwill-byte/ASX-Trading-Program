@@ -1,50 +1,50 @@
 {
   "2000_core0": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "946522111d63",
-    "timestamp": 1792331646.5990841,
+    "variant": "COMBO_N8_reg_B3",
+    "config_hash": "5db2a613dc68",
+    "timestamp": 1792332700.5700166,
     "selected_using_data_before": "2024-07-01"
   },
   "5000_core0": {
     "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "478a779b47fd",
-    "timestamp": 1792331647.3252447,
+    "config_hash": "6c6f1bda89e3",
+    "timestamp": 1792332701.7914624,
     "selected_using_data_before": "2024-07-01"
   },
   "5000_core0.7": {
     "variant": "RAMOM_N8_noreg_B3",
-    "config_hash": "0858e4935dd4",
-    "timestamp": 1792331648.112867,
+    "config_hash": "401ef35c49f7",
+    "timestamp": 1792332703.3470519,
     "selected_using_data_before": "2024-07-01"
   },
   "10000_core0": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "84ae82155de8",
-    "timestamp": 1792331648.7485714,
+    "variant": "COMBO_N8_noreg_B3",
+    "config_hash": "ff1626339ad1",
+    "timestamp": 1792332704.5187137,
     "selected_using_data_before": "2024-07-01"
   },
   "10000_core0.6": {
     "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "2112eea024d1",
-    "timestamp": 1792331649.563624,
+    "config_hash": "fac7cacb4435",
+    "timestamp": 1792332705.9237013,
     "selected_using_data_before": "2024-07-01"
   },
   "25000_core0": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "198fd2306f46",
-    "timestamp": 1792331650.3898375,
+    "variant": "COMBO_N8_noreg_B3",
+    "config_hash": "5d17a5c81699",
+    "timestamp": 1792332707.5613925,
     "selected_using_data_before": "2024-07-01"
   },
   "50000_core0": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "7144bb5fcc71",
-    "timestamp": 1792331651.2127607,
+    "variant": "COMBO_N8_noreg_B3",
+    "config_hash": "d620950f6b1e",
+    "timestamp": 1792332708.976422,
     "selected_using_data_before": "2024-07-01"
   },
   "50000_core0.6": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "de637be7d4c6",
-    "timestamp": 1792331652.035342,
+    "variant": "COMBO_N8_noreg_B3",
+    "config_hash": "7354fc6201e7",
+    "timestamp": 1792332710.3916793,
     "selected_using_data_before": "2024-07-01"
   }
 }
