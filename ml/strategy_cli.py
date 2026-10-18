@@ -21,7 +21,8 @@ from stocktrade import project_path, sanitize_for_json
 logger = logging.getLogger(__name__)
 
 RESULTS = project_path("results")
-SETTINGS = [(10000.0, 0.0), (10000.0, 0.6), (50000.0, 0.0), (50000.0, 0.6)]
+SETTINGS = [(500.0, 0.0), (2000.0, 0.0), (5000.0, 0.0), (5000.0, 0.7), (10000.0, 0.0), (10000.0, 0.6),
+            (25000.0, 0.0), (50000.0, 0.0), (50000.0, 0.6)]
 BENCH_NOTE = "BENCH_TR = VAS.AX adjusted close (total return, net of fees); ^AORD is a price index and excludes dividends."
 FALLBACK_TEXT = "Hold {core} buy-and-hold; add new money in single orders of at least A$2,000."
 
@@ -553,6 +554,7 @@ def strat_publish(cfg: dict, results_dir: pathlib.Path = RESULTS, out: Optional[
         "strategy_comparison": rows,
         "orders_next_open": rec.get("orders_next_open", []),
         "benchmark_note": BENCH_NOTE,
+        "broker": cfg.get("broker"),
         "validation_summary": {s: {k: v.get(k) for k in ("tier", "frozen", "dsr_frozen", "pbo", "neighbours",
                                                          "walk_forward_picks", "survivorship", "stress_windows")}
                                for s, v in setting_status.items()},

@@ -20,7 +20,8 @@ from ml.signals import Context
 
 DEFAULTS = {
     "capital": 10000.0, "core_weight": 0.0, "core_ticker": "VAS.AX", "signal": "RAMOM",
-    "n_positions": 5, "buffer_mult": 3, "min_position": 2500.0, "min_order": 1000.0,
+    "n_positions": 5, "buffer_mult": 3, "min_position": 500.0, "min_order": 500.0,
+    "broker": "stake", "min_parcel": 500.0,
     "regime_filter": True, "regime_band": 0.02, "regime_sma": 200, "si_screen": False, "si_max": 0.05,
     "brokerage": 6.50, "slippage_tiers": {"high": 0.0010, "mid": 0.0025, "low": 0.0050, "etf": 0.0005},
     "slippage_mdv_high": 10e6, "slippage_mdv_mid": 2e6, "cost_stress_mult": 2.0,
@@ -84,6 +85,20 @@ def update_regime(state: Optional[bool], price: float, sma: float, band: float) 
     return state
 
 
+def brokerage_fee(cfg: dict, side: str, value: float) -> float:
+    """Brokerage for one order. Fees come from the research report and are UNVERIFIED: owner should check
+    hellostake.com/au/pricing and cmcmarkets.com/en-au/stockbroking/pricing.
+    The engine places at most one buy per ticker per day, so CMC's "first buy of the day" always holds."""
+    broker = cfg.get("broker", "flat")
+    if broker == "flat":
+        return cfg["brokerage"]
+    if broker == "stake":
+        return 3.0 if value <= 30000 else 0.0001 * value
+    if broker == "cmc":
+        return 0.0 if side == "BUY" and value <= 1000 else max(11.0, 0.001 * value)
+    raise ValueError(f"Unknown broker model: {broker}")
+
+
 def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Dict] = None,
                     end: Optional[str] = None) -> Dict[str, object]:
     core = cfg["core_ticker"].replace(".AX", "")
@@ -93,11 +108,11 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
     if not rows:
         raise ValueError("No decision dates in range.")
     A_last, AO = ctx.A_last, ctx.AO
-    brokerage = cfg["brokerage"]
-    min_order = cfg["min_order"]
+    min_order = max(cfg["min_order"], cfg["min_parcel"])
+    fee = lambda side, value: brokerage_fee(cfg, side, value) * v.slip_mult  # cost stress scales fees too
 
     sat0 = (1 - v.core_weight) * v.capital
-    n_eff = min(v.n, int(sat0 // cfg["min_position"]))
+    n_eff = min(v.n, int(sat0 // max(cfg["min_position"], cfg["min_parcel"])))
     skipped_reason = None
     core_target = v.core_weight
     if n_eff < 3:
@@ -128,6 +143,7 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
             raw = float(A_last.iloc[j - 1][ticker])
         fill = raw * (1 + slip) if side == "BUY" else raw * (1 - slip)
         value = qty * fill
+        brokerage = fee(side, value)
         costs["brokerage"] += brokerage
         costs["slippage"] += qty * raw * slip
         orders.append({"date": ctx.dates[j], "ticker": ticker, "side": side, "shares": qty, "price": fill,
@@ -139,7 +155,12 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
         px = float(AO.iloc[j][ticker])
         if not np.isfinite(px) or px <= 0:
             return 0
-        qty = int((amount - brokerage) // (px * (1 + slip)))
+        qty = int((amount - fee("BUY", amount)) // (px * (1 + slip)))
+        qty = int((amount - fee("BUY", qty * px * (1 + slip))) // (px * (1 + slip)))  # refine with the fee at the real size
+        if 0 < qty and qty * px < cfg["min_parcel"]:  # round up to the minimum parcel if the sleeve's cash covers it
+            up = int(-(-cfg["min_parcel"] // px))
+            if up * px * (1 + slip) + fee("BUY", up * px * (1 + slip)) <= cash[sleeve]:
+                qty = up
         if qty <= 0 or qty * px < min_order:
             return 0
         cash[sleeve] += trade(j, ticker, "BUY", qty, sleeve, slip, reason=reason)

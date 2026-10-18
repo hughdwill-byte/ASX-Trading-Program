@@ -720,6 +720,8 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
   function renderValidation(d, setting) {
     const v = (d.validation_summary || {})[setting], ic = d.signal_ic || {};
     const box = $("val-box"); box.replaceChildren();
+    const brokerNames = { stake: "Stake (A$3 per order)", cmc: "CMC Invest (free buys up to A$1,000)", flat: "Flat A$6.50 per order" };
+    if (d.broker) box.append(el("p", { class: "sub small", text: `Broker model: ${brokerNames[d.broker] || d.broker}. Fees are from a research report; check the broker's site.` }));
     if (v && v.frozen) {
       const dsr = v.dsr_frozen || {}, pbo = v.pbo || {}, nb = v.neighbours || [], sv = v.survivorship || {};
       box.append(el("div", { class: "val-card" }, [

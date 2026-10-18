@@ -24,15 +24,17 @@ strategy:                    # monthly cost-aware strategy (strat-* commands); s
   signal: RAMOM              # default signal for reference; the live variant comes from results/frozen_choice.json
   n_positions: 5             # satellite slots (capped by capital / min_position)
   buffer_mult: 3             # keep a holding until its rank falls below buffer_mult x N
-  min_position: 2500         # smallest position; fewer than 3 slots disables the satellite
-  min_order: 1000            # skip any order smaller than this
+  min_position: 500          # smallest position; fewer than 3 slots disables the satellite
+  min_order: 500             # skip any order smaller than this
   regime_filter: true        # move the satellite to the core ETF when ^AORD is below its 200-day average
   regime_band: 0.02          # +/- band around the 200-day average before the regime flips
   regime_sma: 200            # trend filter length in trading days
   si_screen: false           # skip names with ASIC short interest above si_max
   si_max: 0.05               # 5% of shares on issue reported short
   asic_lag_days: 4           # business days before an ASIC report is treated as known
-  brokerage: 6.50            # $ per order
+  broker: stake              # flat (brokerage below) | stake ($3/order) | cmc (free buys <= $1,000) - fees unverified, check broker sites
+  min_parcel: 500            # ASX minimum marketable parcel; no buy below this
+  brokerage: 6.50            # $ per order for broker: flat
   slippage_tiers: {high: 0.0010, mid: 0.0025, low: 0.0050, etf: 0.0005}  # per side, by MDV60 tier
   slippage_mdv_high: 10000000  # MDV60 at or above this uses the high-liquidity tier
   slippage_mdv_mid: 2000000    # MDV60 at or above this uses the mid tier
