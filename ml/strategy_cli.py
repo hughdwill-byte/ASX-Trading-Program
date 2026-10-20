@@ -516,6 +516,8 @@ def dashboard_setting(ctx, cfg, setting, data, sv: dict, aord_m, ew_m, ranks, en
         return rec
 
     bench_rec = record("BENCH_TR", "VAS total-return benchmark", "benchmark", bench, {"kind": "benchmark"})
+    if not len(bench["orders"]):   # no fill: e.g. A$500 cannot buy a minimum parcel after fees; cash is not "VAS"
+        bench_rec.update(status="unfunded", reason="could not buy a minimum VAS parcel after fees; the account stayed in cash")
     if not bench_at.attrs.get("unpaid_tax"):
         bench_rec["monthly_after_tax"] = _iso_series(bench_at)
     bench_rec["dates"] = [d.date().isoformat() for d in bench_m.index]

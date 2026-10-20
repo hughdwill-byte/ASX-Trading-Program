@@ -735,14 +735,14 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: 0.9rem
     const w = m.what_it_does || {};
     const facts = (x) => x && x.available ? el("ul", { class: "facts" }, x.facts.map((f) => el("li", {}, [f.text, " ", el("span", { class: "src", text: `[${f.metric}${f.window ? `, ${f.window}` : ""}]` })]))) : el("p", { class: "sub", text: (x && (x.reason || "Not available.")) + (x && x.missing && x.missing.length ? ` Missing: ${x.missing.join("; ")}.` : "") });
     const q = m.qualification || {};
-    $("insp-body").replaceChildren(
+    $("insp-body").replaceChildren(...[
       el("h4", { id: "insp-what", text: "What it does" }), el("p", { text: w.text || "No registered description for this method." }),
       w.chips && w.chips.length ? el("ul", { class: "chips", "aria-label": "Method settings" }, w.chips.map((c) => el("li", { text: c }))) : null,
       id === d.frozen ? el("p", { class: "badge", text: `Chosen before testing · current assessment: ${TIER_TEXT[d.tier] || d.tier}` }) : null,
       q.assessment === "not_assessed" ? el("p", { class: "small sub", text: "Not assessed: the engine only assesses the method chosen before testing. Ranking diagnostics here do not assign LIVE or PAPER." }) : null,
       el("h4", { id: "insp-why", text: "Why this historical result" }), facts(m.why_historical),
       el("h4", { text: "Why this evidence rank" }), facts(m.why_rank),
-    );
+    ].filter(Boolean));
   }
   function renderHistory(st) {
     const h = DATA.history, key = scenarioKey();
@@ -853,12 +853,12 @@ footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: 0.9rem
     const d = DATA, body = $("legacy-body");
     if (!d.recommendations || !d.backtest) { body.replaceChildren(el("p", { class: "sub", text: "No legacy data published." })); return; }
     const st = d.settings, t = d.backtest.timesfm, strat = t.strategy, bench = t.benchmark;
-    body.replaceChildren(
+    body.replaceChildren(...[
       el("p", { text: `${fmtDate(d.backtest.start)} to ${fmtDate(d.backtest.end)} · top ${st.top}, ${st.hold}-session holds · A$${st.trade_cost} per order + ${st.slippage_bps / 100}% slippage each side. Prices to ${fmtDate(d.data_date)}.` }),
       el("dl", { class: "kv" }, [["Legacy strategy return", pct(strat.total_return)], [`Index (${st.benchmark}, price only)`, bench ? pct(bench.total_return) : "n/a"], ["Trades", String(t.trades_count)]].flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "num", text: v })])),
       table(["Share", "Median forecast", "10–90% model range", "Qty"], d.recommendations.map((p) => [p.symbol, pct(p.expected), `${pct(p.q10, 0)} to ${pct(p.q90, 0)}`, String(p.qty)]), "Latest legacy picks (model quantiles, not accuracy claims)", [1, 2, 3]),
       d.backtest.recent_trades && d.backtest.recent_trades.length ? table(["Signal", "Exit", "Share", "Return", "P&L"], d.backtest.recent_trades.map((x) => [x.signal_date, x.exit_date, x.symbol, pct(x.return), aud(x.pnl)]), "Legacy recent backtest trades", [3, 4]) : null,
-    );
+    ].filter(Boolean));
   }
 
   // ---------- How it works ----------

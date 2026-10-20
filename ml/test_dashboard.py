@@ -85,6 +85,10 @@ def test_missing_invalid_unfunded_and_after_tax_are_distinct():
     t = db.historical_ranking(ms, b, "after_tax_estimate")
     assert [r["method_id"] for r in t["rows"]] == ["taxed", "BENCH_TR"]
     assert t["not_ranked"][0]["method_id"] == "untaxed"                    # never pre-tax substituted
+    unfunded_vas = bench(0.0)
+    unfunded_vas.update(status="unfunded", reason="could not buy a minimum parcel")
+    u = db.historical_ranking([method("cash", [0.0] * 24)], unfunded_vas)
+    assert u["state"] == "unavailable" and "not funded" in u["reason"] and not u["rows"]   # never "VAS made A$0"
     nob = bench()
     nob["monthly"] = None
     assert db.historical_ranking(ms, nob)["state"] == "unavailable"
