@@ -12,6 +12,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 
 from stocktrade import (
+    SNAPSHOT_FEATURES,
     AppConfig,
     DataIngestor,
     FeatureEngineer,
@@ -61,9 +62,16 @@ def build_dataset(
     end_date: Optional[Union[str, pd.Timestamp]] = None,
     normalise: bool = True,
     save_processed: bool = True,
+    horizon: int = 1,
 ) -> Tuple[pd.DataFrame, pd.Series]:
     """
-    Construct a feature matrix X and target vector y for next-day direction prediction.
+    Construct a RAW feature matrix X and target vector y for H-session direction prediction.
+
+    Timing (F06/F07): features use data up to the close of t; the decision is made after that close; the
+    traded target is the cumulative return from the open of t+1 to the close of t+H (> 0 = 1). Rows whose
+    label is not yet observable are dropped. `X.attrs["label_end"]` holds each row's label end date for
+    purging. X is NOT imputed or scaled: fit `fit_preprocessor` on a training fold only and apply it with
+    `apply_preprocessor` (`normalise` is recorded for that step).
 
     Parameters
     ----------
@@ -126,9 +134,8 @@ def build_dataset(
             logger.debug("Insufficient engineered rows for %s.", sym)
             continue
 
-        features = engineered.copy()
-        features["target"] = (features["close"].shift(-1) > features["close"]).astype(float)
-        features.dropna(subset=["target"], inplace=True)
+        features = make_labels(engineered.copy(), horizon)
+        features.dropna(subset=["target"], inplace=True)   # unknown (terminal) labels are excluded, never 0
         if features.empty:
             continue
         features["target"] = features["target"].astype(int)
@@ -142,6 +149,8 @@ def build_dataset(
 
     combined = pd.concat(frames, ignore_index=True)
     combined["date"] = pd.to_datetime(combined["date"]).dt.tz_localize(None)
+    le = pd.to_datetime(combined["label_end"])
+    combined["label_end"] = le.dt.tz_localize(None) if le.dt.tz is not None else le
     combined.sort_values(["date", "symbol"], inplace=True)
     combined.set_index(["symbol", "date"], inplace=True)
 
@@ -169,30 +178,22 @@ def build_dataset(
             logger.warning("Failed to save processed dataset snapshot: %s", err)
 
     y = full_dataset.pop("target").astype(int)
+    label_end = full_dataset.pop("label_end")
+    full_dataset = full_dataset.drop(columns=["fwd_return"] + [c for c in SNAPSHOT_FEATURES if c in full_dataset])
     feature_frame = full_dataset.select_dtypes(include=[np.number]).copy()
     dropped_columns = sorted(set(full_dataset.columns) - set(feature_frame.columns))
     if dropped_columns:
         logger.debug("Dropped non-numeric columns from feature set: %s", dropped_columns)
-    all_nan_cols = feature_frame.columns[feature_frame.isna().all()]
-    if len(all_nan_cols) > 0:
-        feature_frame.loc[:, all_nan_cols] = 0.0
-        logger.debug("Filled entirely-missing feature columns with 0.0: %s", list(all_nan_cols))
     feature_names = list(feature_frame.columns)
 
     if not feature_names:
         raise RuntimeError("No numeric features available after cleaning.")
 
-    imputer = SimpleImputer(strategy="median")
-    imputed = imputer.fit_transform(feature_frame)
-    if normalise:
-        scaler = StandardScaler()
-        transformed = scaler.fit_transform(imputed)
-    else:
-        scaler = None
-        transformed = imputed
-
-    X = pd.DataFrame(transformed, index=feature_frame.index, columns=feature_names)
-    X.attrs["preprocessor"] = {"imputer": imputer, "scaler": scaler}
+    X = feature_frame
+    X.attrs["preprocessor"] = None   # fitted per training fold (fit_preprocessor), never on all history
+    X.attrs["label_end"] = label_end
+    X.attrs["target"] = target_definition(horizon)
+    X.attrs["normalise"] = bool(normalise)
     X.attrs["artifacts"] = DatasetArtifacts(
         symbols=sorted({sym for sym, _ in X.index}),
         feature_names=feature_names,
@@ -215,6 +216,64 @@ def build_dataset(
     }
     logger.info("Dataset ready: %s rows, %s features.", len(X), len(feature_names))
     return X, y
+
+
+PREPROCESSOR_SCHEMA = "classifier_features_v2"
+
+
+def target_definition(horizon: int) -> Dict[str, Any]:
+    return {"name": "direction_open_t1_to_close_tH", "horizon": int(horizon),
+            "definition": f"close(t+{horizon}) / open(t+1) - 1 > 0; features up to close(t)",
+            "feature_cutoff": "close of t", "execution": "open of t+1"}
+
+
+def make_labels(frame: pd.DataFrame, horizon: int = 1) -> pd.DataFrame:
+    """Forward traded return and label end BEFORE classification. Unknown labels stay NaN."""
+    if horizon < 1:
+        raise ValueError("horizon must be at least 1")
+    px = frame["adj_close"] if "adj_close" in frame else frame["close"]
+    if "open" in frame and "close" in frame:
+        entry = frame["open"].shift(-1) * (px / frame["close"]).shift(-1)   # adjusted next open
+    else:
+        entry = px.shift(-1)
+    fwd = px.shift(-horizon) / entry - 1
+    frame["fwd_return"] = fwd
+    frame["label_end"] = pd.Series(frame.index, index=frame.index).shift(-horizon)
+    frame["target"] = np.where(fwd.notna(), (fwd > 0).astype(float), np.nan)
+    return frame
+
+
+def fit_preprocessor(X_train: pd.DataFrame, normalise: bool = True) -> Dict[str, Any]:
+    """Fit missing-column rules, median imputation and scaling on a training fold only."""
+    keep = [c for c in X_train.columns if X_train[c].notna().any()]   # all-missing in the fold: dropped
+    imputer = SimpleImputer(strategy="median").fit(X_train[keep])
+    scaler = StandardScaler().fit(imputer.transform(X_train[keep])) if normalise else None
+    return {"schema": PREPROCESSOR_SCHEMA, "columns": keep, "input_columns": list(X_train.columns),
+            "imputer": imputer, "scaler": scaler}
+
+
+def apply_preprocessor(pp: Dict[str, Any], X: pd.DataFrame) -> np.ndarray:
+    """Transform with the fitted column order; missing columns become NaN (imputed), extra ones ignored."""
+    if pp.get("schema") != PREPROCESSOR_SCHEMA:
+        raise ValueError("incompatible preprocessor schema")
+    data = pp["imputer"].transform(X.reindex(columns=pp["columns"]))
+    return pp["scaler"].transform(data) if pp["scaler"] is not None else data
+
+
+def purged_split(dates: pd.Index, label_end: pd.Series, test_frac: float = 0.2):
+    """Date-grouped chronological split: every symbol of one decision date is on the same side; training rows
+    whose label ends on/after the first test date are purged. Returns (train_mask, test_mask, info)."""
+    d = pd.DatetimeIndex(dates)
+    unique = np.array(sorted(d.unique()))
+    if len(unique) < 3:
+        raise RuntimeError("Not enough distinct dates for a train/test split.")
+    first_test = unique[min(max(1, int((1 - test_frac) * len(unique))), len(unique) - 1)]
+    test = d >= first_test
+    ends = pd.DatetimeIndex(label_end)
+    train = (d < first_test) & (ends < first_test)
+    info = {"first_test_date": pd.Timestamp(first_test).isoformat(), "train_cutoff": pd.Timestamp(d[train].max()).isoformat(),
+            "label_cutoff": pd.Timestamp(ends[train].max()).isoformat(), "purged_rows": int(((d < first_test) & ~train).sum())}
+    return np.asarray(train), np.asarray(test), info
 
 
 def _resolve_config_path(config_path: Optional[Union[str, pathlib.Path]]) -> pathlib.Path:
@@ -414,21 +473,31 @@ def _augment_with_recommendations(
         return dataset
     symbols = dataset.index.get_level_values("symbol")
     dates = dataset.index.get_level_values("date")
-    reco_count = symbols.map(lambda s: stats.get(s, {}).get("reco_count", 0.0)).astype(float)
-    reco_avg_prob = symbols.map(lambda s: stats.get(s, {}).get("reco_avg_prob", np.nan)).astype(float)
-    reco_last_prob = symbols.map(lambda s: stats.get(s, {}).get("reco_last_prob", np.nan)).astype(float)
-    days_since = []
-    for sym, dt_val in zip(symbols, dates):
-        last_date = stats.get(sym, {}).get("reco_last_date")
-        if last_date is None:
-            days_since.append(np.nan)
-        else:
-            days_since.append(float((dt_val - last_date).days))
-    dataset["reco_count"] = reco_count
-    dataset["reco_avg_prob"] = reco_avg_prob
-    dataset["reco_last_prob"] = reco_last_prob
-    dataset["reco_days_since"] = np.array(days_since, dtype=float)
+    # These are snapshot aggregates (available at their last date), not a point-in-time history: they are used
+    # only on rows dated on/after that availability date and are missing earlier (never broadcast backwards).
+    avail = _available_mask(symbols, dates, stats, "reco_last_date")
+    for col, key, default in (("reco_count", "reco_count", 0.0), ("reco_avg_prob", "reco_avg_prob", np.nan),
+                              ("reco_last_prob", "reco_last_prob", np.nan)):
+        vals = symbols.map(lambda s: stats.get(s, {}).get(key, default)).astype(float)
+        dataset[col] = np.where(avail, vals, np.nan)
+    dataset["reco_days_since"] = _days_since(symbols, dates, stats, "reco_last_date")
     return dataset
+
+
+def _available_mask(symbols, dates, stats, date_key: str) -> np.ndarray:
+    out = []
+    for sym, dt_val in zip(symbols, dates):
+        when = stats.get(sym, {}).get(date_key)
+        out.append(when is not None and dt_val >= when)
+    return np.array(out, dtype=bool)
+
+
+def _days_since(symbols, dates, stats, date_key: str) -> np.ndarray:
+    out = []
+    for sym, dt_val in zip(symbols, dates):
+        when = stats.get(sym, {}).get(date_key)
+        out.append(float((dt_val - when).days) if when is not None and dt_val >= when else np.nan)
+    return np.array(out, dtype=float)
 
 
 def _augment_with_short_reports(
@@ -443,26 +512,12 @@ def _augment_with_short_reports(
         return dataset
     symbols = dataset.index.get_level_values("symbol")
     dates = dataset.index.get_level_values("date")
-    dataset["short_percent_cached"] = symbols.map(
-        lambda s: stats.get(s, {}).get("short_percent", np.nan)
-    ).astype(float)
-    dataset["short_rank_cached"] = symbols.map(
-        lambda s: stats.get(s, {}).get("short_rank", np.nan)
-    ).astype(float)
-    dataset["short_positions_cached"] = symbols.map(
-        lambda s: stats.get(s, {}).get("short_positions", np.nan)
-    ).astype(float)
-    dataset["short_report_score"] = symbols.map(
-        lambda s: stats.get(s, {}).get("short_report_score", 0.0)
-    ).astype(float)
-    days_since = []
-    for sym, dt_val in zip(symbols, dates):
-        last_date = stats.get(sym, {}).get("short_report_date")
-        if last_date is None:
-            days_since.append(np.nan)
-        else:
-            days_since.append(float((dt_val - last_date).days))
-    dataset["days_since_short_report"] = np.array(days_since, dtype=float)
+    avail = _available_mask(symbols, dates, stats, "short_report_date")   # as-of: no backwards broadcast
+    for col, key in (("short_percent_cached", "short_percent"), ("short_rank_cached", "short_rank"),
+                     ("short_positions_cached", "short_positions"), ("short_report_score", "short_report_score")):
+        vals = symbols.map(lambda s: stats.get(s, {}).get(key, np.nan)).astype(float)
+        dataset[col] = np.where(avail, vals, np.nan)
+    dataset["days_since_short_report"] = _days_since(symbols, dates, stats, "short_report_date")
     return dataset
 
 

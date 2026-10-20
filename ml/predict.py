@@ -17,8 +17,6 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     torch = None  # type: ignore
 
-from ml.sequence_model import SequenceFusionModel, SequenceModelConfig
-
 _ARTIFACT_CACHE: Dict[pathlib.Path, Dict[str, Any]] = {}
 DEFAULT_MODEL_CANDIDATES = (
     project_path("ml", "model.pt"),
@@ -96,26 +94,29 @@ def predict_next_day(
             )
         return _predict_sequence_model(artifact, history)
 
+    if artifact.get("schema") != "classifier_v2":
+        raise RuntimeError("Incompatible model artifact (pre-v2: fitted on all history with same-day labels); "
+                           "retrain with ml/train_model.py.")
+    from ml.dataset_builder import apply_preprocessor
+
     model = artifact["model"]
     feature_names: Sequence[str] = artifact["feature_names"]
-    preprocessor: Mapping[str, Any] = artifact.get("preprocessor", {})
-    imputer = preprocessor.get("imputer")
-    scaler = preprocessor.get("scaler")
-    if imputer is None:
-        raise RuntimeError("Loaded artifact does not include an imputer.")
+    preprocessor: Mapping[str, Any] = artifact["preprocessor"]
 
+    # Precedence: the latest history row supplies defaults; explicit input_features override it key by key.
+    features_df = _coerce_features(input_features, feature_names) if input_features is not None else None
     if history is not None and isinstance(history, pd.DataFrame) and len(history) >= 1:
-        latest_row = history.iloc[[-1]].copy()
-        for col in feature_names:
-            if col not in latest_row.columns:
-                latest_row[col] = np.nan
-        features_df = _coerce_features(latest_row, feature_names)
-    else:
-        features_df = _coerce_features(input_features, feature_names)
+        latest = _coerce_features(history.iloc[[-1]].copy(), feature_names)
+        if features_df is not None:
+            explicit = features_df.iloc[0]
+            for col in feature_names:
+                if pd.notna(explicit[col]):
+                    latest.iloc[0, latest.columns.get_loc(col)] = explicit[col]
+        features_df = latest
+    if features_df is None:
+        raise ValueError("Provide input_features and/or history.")
 
-    data = imputer.transform(features_df)
-    if scaler is not None:
-        data = scaler.transform(data)
+    data = apply_preprocessor(dict(preprocessor), features_df)
     prob_matrix = _predict_proba(model, data)
     prob_up = float(prob_matrix[0])
     threshold = float(artifact.get("threshold", 0.5))
@@ -259,6 +260,8 @@ def _predict_sequence_model(artifact: Dict[str, Any], history: pd.DataFrame) -> 
 
     temporal_tensor = torch.from_numpy(temporal_array).unsqueeze(0)
     static_tensor = torch.from_numpy(static_array).unsqueeze(0) if static_features else None
+
+    from ml.sequence_model import SequenceFusionModel, SequenceModelConfig   # lazy: torch only when needed
 
     config = SequenceModelConfig(**artifact["config"])
     model = artifact.get("_model_instance")

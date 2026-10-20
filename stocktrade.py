@@ -1280,9 +1280,13 @@ class FeatureEngineer:
             data["index_return_1d"].rolling(5).std().fillna(0.0)
         )
 
-        data["target"] = (data["close"] > data["open"]).astype(int)
+        # Tradable target (F06): features use data up to the close of t; the decision is made after that close;
+        # the label is the NEXT session's open -> close move (enter at open t+1, exit at close t+1). The last
+        # row's label is unknown (NaN): it is kept for prediction and excluded from training.
+        nxt_open, nxt_close = data["open"].shift(-1), data["close"].shift(-1)
+        data["target"] = (nxt_close > nxt_open).astype(float).where(nxt_open.notna() & nxt_close.notna())
         data.replace([np.inf, -np.inf], np.nan, inplace=True)
-        data.dropna(inplace=True)
+        data.dropna(subset=[c for c in data.columns if c != "target"], inplace=True)
         return data
 
     @staticmethod
@@ -1646,14 +1650,24 @@ class FeatureEngineer:
 # -------- Modeling ----------------------------------------------------------------------
 
 
+# Columns filled from a single current snapshot (fundamentals, quotes, news, shorts, depth, global context) and
+# broadcast to every row by FeatureEngineer. They are not point-in-time history, so they are excluded from model
+# training/inference features (F08); they remain on the frame for display and live risk checks only.
+SNAPSHOT_FEATURES = frozenset({
+    "pe_ratio", "div_yield", "eps", "market_cap", "last_dividend", "rvol", "vwap", "volume_strength",
+    "news_sentiment", "news_sentiment_lag1", "short_interest", "order_imbalance", "global_trend", "commodity_trend",
+})
+
+
 class ModelTrainer:
     def __init__(self, config: ModelConfig) -> None:
         self.config = config
         self.model: Optional[Pipeline] = None
 
     def train(self, data: pd.DataFrame) -> Pipeline:
+        data = data.loc[data["target"].notna()]   # unknown labels never enter training
         features = self._feature_columns(data)
-        target = data["target"]
+        target = data["target"].astype(int)
         tscv = TimeSeriesSplit(n_splits=self.config.test_splits)
 
         param_sets: List[Optional[Dict[str, Any]]] = [None]
@@ -1732,6 +1746,23 @@ class ModelTrainer:
             best_override or "base",
         )
         return best_model
+
+    def oos_predict(self, data: pd.DataFrame, n_splits: Optional[int] = None) -> pd.Series:
+        """Chronological out-of-sample probabilities: each fold is predicted by a model fitted only on earlier
+        rows with known labels (one-row purge before the fold). Rows before the first fold stay NaN."""
+        out = pd.Series(np.nan, index=data.index)
+        known = data["target"].notna().to_numpy()
+        features = self._feature_columns(data)
+        for train_idx, test_idx in TimeSeriesSplit(n_splits=n_splits or self.config.test_splits).split(data):
+            tr = train_idx[:-1][known[train_idx[:-1]]]
+            if len(tr) < 20 or len(np.unique(data["target"].iloc[tr])) < 2:
+                continue
+            model = self._build_pipeline(None)
+            model.fit(data.iloc[tr][features], data["target"].iloc[tr].astype(int))
+            classes = list(getattr(model, "classes_", [0, 1]))
+            proba = model.predict_proba(data.iloc[test_idx][features])
+            out.iloc[test_idx] = proba[:, classes.index(1)] if 1 in classes else 0.0
+        return out
 
     def predict(self, data: pd.DataFrame) -> pd.Series:
         if self.model is None:
@@ -1837,7 +1868,7 @@ class ModelTrainer:
 
     @staticmethod
     def _feature_columns(data: pd.DataFrame) -> List[str]:
-        exclude = {"target"}
+        exclude = {"target"} | SNAPSHOT_FEATURES   # today's snapshots have no history: never model inputs
         numeric_cols = data.select_dtypes(include=[np.number]).columns
         ordered = [
             "return_1d",
@@ -2319,11 +2350,12 @@ class TradingOrchestrator:
         trainer = ModelTrainer(self.config.model)
         model = trainer.train(engineered)
         logging.info("Training completed for %s.", symbol)
+        known = engineered.loc[engineered["target"].notna()]
         logging.debug(
-            "\n%s",
+            "IN-SAMPLE (fit on all labelled rows; not evidence of skill)\n%s",
             classification_report(
-                engineered["target"],
-                model.predict(engineered[trainer._feature_columns(engineered)]),
+                known["target"].astype(int),
+                model.predict(known[trainer._feature_columns(known)]),
             ),
         )
         self.trainer = trainer
@@ -2331,8 +2363,8 @@ class TradingOrchestrator:
 
     def run_backtest(self, symbol: str) -> Dict[str, Any]:
         _, engineered = self.run_training(symbol)
-        proba = self.trainer.predict(engineered)
-        engineered = engineered.assign(prob_up=proba)
+        proba = self.trainer.oos_predict(engineered)   # chronological out-of-sample, never the all-data fit
+        engineered = engineered.assign(prob_up=proba).loc[proba.notna()]
         engineered["approx_spread_ratio"] = (engineered["high"] - engineered["low"]) / engineered["adj_close"]
         report = self.backtester.run(engineered)
         logging.info("Backtest completed for %s.", symbol)
@@ -2466,13 +2498,23 @@ class TradingOrchestrator:
                 skipped_count += 1
                 continue
 
-            train_frame = engineered[engineered.index < eval_ts]
+            # Causal timing (F06): open_to_close trades eval_ts's own session, so the prediction must come from
+            # the previous session's close; labels used in training must be known by then.
+            decision_ts = eval_ts
+            if (self.config.model.trading_mode or "standard").lower() == "open_to_close":
+                prior = engineered.index[engineered.index < eval_ts]
+                if not len(prior):
+                    skipped.append({"symbol": sym, "reason": "no_prior_session"})
+                    skipped_count += 1
+                    continue
+                decision_ts = prior[-1]
+            train_frame = engineered[engineered.index < decision_ts]
             if len(train_frame) <= self.config.model.test_splits:
                 skipped.append({"symbol": sym, "reason": "insufficient_training_rows"})
                 skipped_count += 1
                 continue
 
-            evaluation_frame = engineered.loc[[eval_ts]]
+            evaluation_frame = engineered.loc[[decision_ts]]
 
             trainer = ModelTrainer(self.config.model)
             try:
