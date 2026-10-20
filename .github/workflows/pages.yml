@@ -52,6 +52,7 @@ jobs:
           python ml/test_engine_repairs.py
           python ml/test_accounting.py
           python ml/test_ml_causal.py
+          python ml/test_dashboard.py
       - name: Download latest ASX prices
         run: time python stocktrade.py --log-level WARNING ingest
       - name: Legacy weekly TimesFM picks and backtest

@@ -1,33 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-AU">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ASX TimesFM Picks</title>
+<title>ASX Research</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="Daily ASX stock picks from Google's TimesFM forecasting model, with a cost-inclusive backtest against the All Ordinaries.">
+<meta name="description" content="ASX Research: a personal research program that tests cost-aware ASX share strategies against the VAS total-return benchmark. Simulations only; it places no trades.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M6 22l6-7 5 4 9-11' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
-/* Layout: a trading-desk sheet. Status strip, today's order tickets, then the track record, then the fine print. */
+/* Calm eucalyptus research sheet. Text tokens meet WCAG AA (>=4.5:1) on page, surface and sunk in both themes. */
 :root {
   color-scheme: light;
-  --page: #f6f7f4;          /* eucalyptus-tinted paper */
-  --surface: #fcfcfb;
-  --sunk: #eef0eb;
-  --ink: #0f1411;
-  --ink-2: #4c534d;
-  --muted: #858b84;
-  --grid: #e1e3dc;
-  --axis: #c3c6bd;
-  --line: rgba(15, 20, 17, 0.10);
-  --accent: #2a78d6;        /* TimesFM = series 1 everywhere */
-  --accent-wash: rgba(42, 120, 214, 0.14);
-  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
-  --good: #0ca30c; --good-text: #006300; --warn: #fab219; --bad: #d03b3b;
-  --hist: #9a9f97;
+  --page: #f6f7f4; --surface: #fcfcfb; --sunk: #eef0eb;
+  --ink: #0f1411; --ink-2: #4c534d; --muted: #5c635b;            /* muted was #858b84 (3.04:1 on sunk) */
+  --grid: #e1e3dc; --axis: #8a8f86; --line: rgba(15, 20, 17, 0.12);
+  --accent: #2a78d6; --accent-text: #1f65b8; --accent-wash: rgba(42, 120, 214, 0.12);
+  --s1: #2a78d6; --s2: #c2521f; --s3: #12825a; --s4: #946500;
+  --accent-strong: #1f65b8; --on-accent: #ffffff;
+  --good: #0ca30c; --good-text: #006300; --warn: #b07800; --bad-text: #b42d2d;
+  --hist: #7a8076;
   --f-display: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif;
   --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -37,913 +31,903 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --page: #0e110f; --surface: #181b19; --sunk: #202421;
-    --ink: #eef0ea; --ink-2: #c1c6bd; --muted: #8b918a;
-    --grid: #2a2e2b; --axis: #3a3f3b; --line: rgba(255, 255, 255, 0.10);
-    --accent: #3987e5; --accent-wash: rgba(57, 135, 229, 0.20);
-    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
-    --good-text: #0ca30c; --hist: #6f756e;
+    --ink: #eef0ea; --ink-2: #c1c6bd; --muted: #9ba198;
+    --grid: #2a2e2b; --axis: #6d736b; --line: rgba(255, 255, 255, 0.12);
+    --accent: #3987e5; --accent-text: #5c9fee; --accent-wash: rgba(57, 135, 229, 0.20);
+    --s1: #5c9fee; --s2: #e07040; --s3: #2fb886; --s4: #d79a1a;
+    --good-text: #3cc23c; --warn: #d79a1a; --bad-text: #e06060; --hist: #8b918a;
+    --accent-strong: #5c9fee; --on-accent: #0e110f;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --page: #0e110f; --surface: #181b19; --sunk: #202421;
-  --ink: #eef0ea; --ink-2: #c1c6bd; --muted: #8b918a;
-  --grid: #2a2e2b; --axis: #3a3f3b; --line: rgba(255, 255, 255, 0.10);
-  --accent: #3987e5; --accent-wash: rgba(57, 135, 229, 0.20);
-  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
-  --good-text: #0ca30c; --hist: #6f756e;
+  --ink: #eef0ea; --ink-2: #c1c6bd; --muted: #9ba198;
+  --grid: #2a2e2b; --axis: #6d736b; --line: rgba(255, 255, 255, 0.12);
+  --accent: #3987e5; --accent-text: #5c9fee; --accent-wash: rgba(57, 135, 229, 0.20);
+  --s1: #5c9fee; --s2: #e07040; --s3: #2fb886; --s4: #d79a1a;
+  --good-text: #3cc23c; --warn: #d79a1a; --bad-text: #e06060; --hist: #8b918a;
+  --accent-strong: #5c9fee; --on-accent: #0e110f;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--page); color: var(--ink);
-  font: 15px/1.55 var(--f-body);
+  font: 16px/1.6 var(--f-body);
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
-.wrap { max-width: 1160px; margin: 0 auto; padding-block: 20px 64px; display: grid; gap: 40px; }
-.wrap > * { min-width: 0; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 12px 64px; display: grid; gap: 28px; }
+.wrap > *, main > *, .view > *, .sec > *, .card > *, .scenario > *, .status-grid > *, .rank-item > *, .rank-top > *, details > * { min-width: 0; }
+main { display: grid; gap: 24px; }
 h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
-h1 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); line-height: 1.1; }
-h2 { font-size: 1.35rem; }
-h3 { font-size: 1.02rem; }
-p { margin: 0; max-width: 68ch; }
-a { color: var(--accent); }
-.eyebrow { font: 600 0.72rem/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.mono, .num { font-family: var(--f-mono); }
-.num { font-variant-numeric: tabular-nums; }
+h1 { font-size: clamp(1.6rem, 3.2vw, 2.2rem); line-height: 1.1; }
+h2 { font-size: 1.4rem; }
+h3 { font-size: 1.1rem; }
+p { margin: 0; max-width: 70ch; }
+a { color: var(--accent-text); }
+.eyebrow { font: 600 0.875rem/1.2 var(--f-mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.mono { font-family: var(--f-mono); }
+.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
 .sub { color: var(--ink-2); }
-button { font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.small { font-size: 0.9rem; }
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.skip { position: absolute; left: -999px; top: 8px; background: var(--surface); padding: 10px 14px; border-radius: 8px; z-index: 10; }
+.skip:focus { left: 16px; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-/* Masthead */
-.mast { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: end; justify-content: space-between; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
-.mast-text { display: grid; gap: 8px; min-width: 0; }
-.status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: var(--sunk); font: 500 0.8rem/1 var(--f-mono); color: var(--ink-2); white-space: nowrap; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-.pill.fresh .dot { background: var(--good); }
-.pill.stale .dot { background: var(--warn); }
-.theme-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 0.8rem; }
-.banner { padding: 12px 16px; border-radius: var(--r); background: var(--sunk); border-left: 4px solid var(--warn); }
+/* Masthead + navigation */
+.mast { display: grid; gap: 12px; padding: 8px 0 14px; border-bottom: 1px solid var(--line); }
+.mast-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.mast p { font-size: 0.95rem; color: var(--ink-2); }
+nav ul { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
+nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px; text-decoration: none; color: var(--ink); background: var(--sunk); font-weight: 500; }
+nav a[aria-current="page"] { background: var(--accent-strong); color: var(--on-accent); }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 14px; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; cursor: pointer; }
+.btn.small { min-height: 36px; padding: 0 10px; font-size: 0.9rem; }
+.linkbtn { background: none; border: 0; padding: 6px 2px; min-height: 44px; color: var(--accent-text); text-decoration: underline; cursor: pointer; }
 
-/* Section heads */
-.sec { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
-.sec-head { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; justify-content: space-between; }
-.sec-head p { font-size: 0.92rem; }
+.banner { padding: 12px 16px; border-radius: var(--r); background: var(--sunk); border-left: 4px solid var(--warn); display: grid; gap: 8px; }
+.banner.info { border-left-color: var(--accent); }
+.scenario { display: grid; gap: 8px; padding: 14px 16px; border: 1px dashed var(--axis); border-radius: var(--r); background: var(--surface); }
+.scenario label { display: grid; gap: 4px; font-weight: 600; }
+#scenario { width: 100%; }
+select, input[type="search"] { min-height: 44px; max-width: 100%; color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 8px; padding: 6px 10px; }
 
-/* Order tickets */
-.tickets { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; }
-.ticket { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; min-width: 0; }
-.t-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
-.t-sym { font: 600 1.55rem/1 var(--f-mono); letter-spacing: 0.02em; }
-.t-name { font-size: 0.85rem; color: var(--ink-2); margin-top: 4px; overflow-wrap: anywhere; }
-.t-rank { font: 500 0.75rem/1.3 var(--f-mono); color: var(--muted); }
-.t-fc { text-align: right; flex: none; max-width: 45%; }
-.t-fc .big { font: 600 1.3rem/1 var(--f-mono); font-variant-numeric: tabular-nums; }
-.t-fc .lbl { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
-.kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 0.8fr); gap: 8px 12px; border-top: 1px solid var(--line); padding-top: 12px; }
-.kv div { display: grid; gap: 2px; min-width: 0; }
-.kv dt { font-size: 0.72rem; color: var(--muted); }
-.kv dd { margin: 0; font: 500 0.92rem/1.2 var(--f-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.mini-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.74rem; color: var(--ink-2); }
-.key { display: inline-flex; align-items: center; gap: 6px; }
-.key i { display: inline-block; width: 14px; height: 2px; border-radius: 2px; }
-.key i.band { height: 10px; }
-.empty-picks { padding: 20px; border-radius: var(--r); background: var(--surface); border: 1px dashed var(--axis); color: var(--ink-2); }
-
-/* KPIs */
-.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-.kpi { background: var(--surface); padding: 16px; display: grid; gap: 6px; align-content: start; }
-.kpi .v { font: 600 1.6rem/1.05 var(--f-display); }
-.kpi.hero .v { font-size: 2.6rem; }
-.kpi .d { font-size: 0.82rem; color: var(--ink-2); display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
-.arrow { font-size: 0.8em; }
-.arrow.up { color: var(--good); } .arrow.down { color: var(--bad); }
-
-@media (max-width: 720px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kpi.hero .v { font-size: 2rem; } }
-
-/* Chart cards */
+.view { display: grid; gap: 24px; }
+.sec { display: grid; gap: 14px; }
+.sec-head { display: grid; gap: 6px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; min-width: 0; }
-.card-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: center; }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.84rem; color: var(--ink-2); }
-.toggle { border: 1px solid var(--line); background: var(--sunk); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem; }
-.chart { position: relative; width: 100%; }
-.chart svg { display: block; width: 100%; overflow: visible; }
-.chart text { font-family: var(--f-mono); font-size: 11px; fill: var(--muted); }
-.chart .end-label { fill: var(--ink); font-weight: 500; }
-.tip { position: absolute; pointer-events: none; z-index: 2; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.12); font-size: 0.78rem; min-width: 150px; display: grid; gap: 3px; }
-.tip .t-date { color: var(--muted); font-family: var(--f-mono); }
-.tip .row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-.tip .row span:first-child { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); }
-.tip .row b { font-family: var(--f-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.result h2 { font-size: clamp(1.3rem, 2.6vw, 1.7rem); }
+.result .reason { font-size: 1.05rem; }
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font: 600 0.875rem/1.5 var(--f-mono); background: var(--sunk); color: var(--ink); border: 1px solid var(--line); }
+.badge.ok::before { content: "✓ "; color: var(--good-text); }
+.badge.no::before { content: "✗ "; color: var(--bad-text); }
+.badge.warn::before { content: "! "; color: var(--warn); }
+dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+details > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--ink); font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 0; }
+.chips li { background: var(--sunk); border-radius: 999px; padding: 2px 10px; font-size: 0.9rem; }
+.facts { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; }
+.facts .src { color: var(--muted); font-size: 0.875rem; }
+.inspecting { border-left: 4px solid var(--accent); }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tabs [aria-selected="true"] { background: var(--accent-strong); color: var(--on-accent); border-color: var(--accent-strong); }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; }
+.controls label { display: grid; gap: 4px; font-size: 0.95rem; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 
-/* Recommendation */
-.rec { display: grid; gap: 10px; padding: 20px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
-.rec-top { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
-.rec h2 { font-size: 1.1rem; color: var(--ink-2); font-family: var(--f-body); font-weight: 600; }
-.rec-action { font: 600 clamp(1.15rem, 2.4vw, 1.5rem)/1.3 var(--f-display); max-width: 60ch; }
-.tier { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--sunk); font: 600 0.8rem/1 var(--f-mono); letter-spacing: 0.06em; }
-.tier .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
-.tier.LIVE .dot { background: var(--good); }
-.tier.PAPER .dot { background: var(--warn); }
-details summary { cursor: pointer; color: var(--ink-2); font-size: 0.9rem; }
-details[open] summary { margin-bottom: 8px; }
-.filters { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 0.86rem; color: var(--ink-2); }
-.filters label { display: inline-flex; gap: 8px; align-items: center; min-width: 0; max-width: 100%; }
-.filters select { min-width: 0; max-width: 100%; text-overflow: ellipsis; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
-th.sortable { cursor: pointer; user-select: none; }
-th.sortable:hover { color: var(--ink); }
-th[aria-sort="descending"]::after { content: " ↓"; } th[aria-sort="ascending"]::after { content: " ↑"; }
-tr.pass td { background: var(--accent-wash); }
-tr.skip td { color: var(--muted); }
-tr.base td:first-child { font-style: italic; }
-.badge { display: inline-block; margin-left: 6px; padding: 2px 6px; border-radius: 4px; font: 600 0.65rem/1.2 var(--f-mono); letter-spacing: 0.05em; background: var(--sunk); color: var(--ink-2); vertical-align: middle; }
-.small { font-size: 0.8rem; }
-.pass-key { background: var(--accent-wash); padding: 0 4px; border-radius: 3px; color: var(--ink); }
-.legacy-note { font-size: 0.86rem; border-left-color: var(--axis); }
-.val-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 10px; min-width: 0; }
+/* Ranking cards: single column on phones; the same rows become a table on wide screens */
+.rank-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.rank-item { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 8px; }
+.rank-item.inspected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rank-top { display: grid; grid-template-columns: 3.2em 1fr; gap: 8px 12px; align-items: start; }
+.rank-no { font: 600 1.3rem/1.2 var(--f-mono); }
+.rank-name { font-weight: 600; overflow-wrap: anywhere; }
+.rank-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 6px 14px; }
+.rank-metrics div { display: grid; }
+.rank-metrics span:first-child { color: var(--muted); font-size: 0.875rem; }
 
-/* Tables */
+/* Tables (only for necessary 2D data) */
 .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
-table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
-th, td { padding: 9px 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
-th { font: 600 0.7rem/1.2 var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--sunk); }
+table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+caption { text-align: left; padding: 10px 12px 0; color: var(--ink-2); font-size: 0.9rem; }
+th, td { padding: 8px 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 0.875rem/1.3 var(--f-mono); color: var(--ink-2); background: var(--sunk); }
+th button { all: unset; cursor: pointer; display: inline-flex; gap: 4px; min-height: 32px; align-items: center; }
+th button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 td.r, th.r { text-align: right; }
-td.num { font-family: var(--f-mono); }
+td.wrap-cell { white-space: normal; min-width: 18ch; }
 tbody tr:last-child td { border-bottom: 0; }
 
-/* How it works */
-.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; counter-reset: step; margin: 0; padding: 0; list-style: none; }
-.steps li { counter-increment: step; display: grid; gap: 6px; align-content: start; padding-top: 14px; border-top: 2px solid var(--ink); }
-.steps li::before { content: "Step " counter(step); font: 600 0.72rem/1 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
-.steps p { font-size: 0.9rem; color: var(--ink-2); }
+/* Charts */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.95rem; color: var(--ink-2); }
+.key { display: inline-flex; align-items: center; gap: 6px; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { font-family: var(--f-mono); font-size: 12px; fill: var(--muted); }
+.chart .end-label { fill: var(--ink); font-weight: 500; }
+.tip { position: absolute; pointer-events: none; z-index: 2; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.12); font-size: 0.875rem; min-width: 150px; display: grid; gap: 3px; }
+.tip .t-date { color: var(--muted); font-family: var(--f-mono); }
+.tip .row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tip .row b { font-family: var(--f-mono); font-weight: 600; }
 
-.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 24px; align-items: start; }
-.settings { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; font-size: 0.9rem; }
-.settings dt { color: var(--muted); }
-.settings dd { margin: 0; font-family: var(--f-mono); overflow-wrap: anywhere; }
-.cmds { display: grid; gap: 10px; }
-.cmd { display: grid; gap: 4px; }
-.cmd .lbl { font-size: 0.82rem; color: var(--ink-2); }
-.code { display: flex; align-items: center; gap: 8px; background: var(--sunk); border-radius: 8px; padding: 8px 8px 8px 12px; min-width: 0; }
-.code code { font: 0.82rem/1.4 var(--f-mono); overflow-x: auto; white-space: pre; flex: 1; min-width: 0; }
-.copy { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 4px 9px; cursor: pointer; font-size: 0.75rem; flex: none; }
-.risks { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; color: var(--ink-2); font-size: 0.92rem; max-width: 80ch; }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; counter-reset: step; margin: 0; padding: 0; list-style: none; }
+.steps li { counter-increment: step; display: grid; gap: 6px; align-content: start; padding-top: 12px; border-top: 2px solid var(--ink); }
+.steps li::before { content: "Step " counter(step); font: 600 0.875rem/1 var(--f-mono); color: var(--accent-text); }
+.code { display: flex; align-items: center; gap: 8px; background: var(--sunk); border-radius: 8px; padding: 6px 6px 6px 12px; min-width: 0; }
+.code code { font: 0.9rem/1.4 var(--f-mono); overflow-x: auto; white-space: pre; flex: 1; min-width: 0; }
+.risks { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; color: var(--ink-2); max-width: 80ch; }
 .risks b { color: var(--ink); }
-footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82rem; color: var(--muted); display: grid; gap: 6px; }
-@media (prefers-reduced-motion: no-preference) { .ticket { transition: border-color .15s; } .ticket:hover { border-color: var(--axis); } }
+.tickets { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.card > .badge { justify-self: start; }
+/* Narrow screens: the profit ranking becomes one card per method; sort buttons stay available. */
+@media (max-width: 700px) {
+  .stack table, .stack tbody, .stack tr, .stack td, .stack caption { display: block; width: 100%; }
+  .stack thead tr { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; }
+  .stack thead th { background: none; padding: 0; border: 0; }
+  .stack thead th:not(:has(button)) { display: none; }
+  .stack th button { border: 1px solid var(--axis); border-radius: 8px; padding: 0 10px; min-height: 44px; }
+  .stack tbody tr { border-bottom: 1px solid var(--line); padding: 8px 4px; }
+  .stack td { border: 0; padding: 4px 8px; white-space: normal; text-align: left !important; }
+  .stack td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); font-family: var(--f-body); }
+  .tbl-wrap.stack { overflow-x: visible; }
+}
+footer { border-top: 1px solid var(--line); padding-top: 16px; font-size: 0.9rem; color: var(--muted); display: grid; gap: 6px; }
 </style>
 </head>
 <body>
+<a class="skip" href="#main">Skip to main content</a>
 <div class="wrap">
   <header class="mast">
-    <div class="mast-text">
-      <span class="eyebrow">ASX equities · daily forecast</span>
-      <h1>ASX TimesFM Picks</h1>
-      <p class="sub">Every month the program tests 22 cost-aware strategies on 10 years of ASX prices against a total-return All Ords benchmark. It recommends a strategy only if it passes every out-of-sample and overfitting test; otherwise it recommends a low-cost index ETF.</p>
+    <div class="mast-row">
+      <div>
+        <span class="eyebrow">Personal research program · simulations only</span>
+        <h1>ASX Research</h1>
+      </div>
+      <button class="btn" id="theme-btn" type="button" aria-pressed="false">Dark theme</button>
     </div>
-    <div class="status">
-      <span class="pill" id="data-pill"><span class="dot"></span><span id="data-date">Loading…</span></span>
-      <span class="pill" id="universe-pill">— stocks screened</span>
-      <button class="theme-btn" id="theme-btn" type="button" aria-label="Toggle colour theme">Theme</button>
-    </div>
+    <p id="mast-sub">Tests cost-aware ASX share methods against the VAS total-return benchmark. <strong>This program places no trades.</strong></p>
+    <nav aria-label="Main">
+      <ul>
+        <li><a href="#/today" data-view="today">Today</a></li>
+        <li><a href="#/performance" data-view="performance">Performance</a></li>
+        <li><a href="#/research" data-view="research">Research</a></li>
+        <li><a href="#/how" data-view="how">How it works</a></li>
+      </ul>
+    </nav>
   </header>
 
-  <div id="banner" class="banner" hidden></div>
+  <main id="main" tabindex="-1">
+    <div id="load-state" class="banner" role="status" aria-live="polite">Loading published results…</div>
+    <div id="pub-banner" class="banner" hidden></div>
+    <p id="announce" class="vh" role="status" aria-live="polite"></p>
 
-  <section class="rec" id="rec" aria-labelledby="rec-h" hidden>
-    <div class="rec-top">
-      <span class="tier" id="rec-tier"><span class="dot"></span><span id="rec-tier-text">—</span></span>
-      <span class="eyebrow" id="rec-asof"></span>
+    <div id="scenario-box" class="scenario" hidden>
+      <label for="scenario">Research scenario</label>
+      <select id="scenario"></select>
+      <p class="small sub" id="scenario-note"></p>
     </div>
-    <h2 id="rec-h">Today's recommendation</h2>
-    <p class="rec-action" id="rec-action"></p>
-    <div class="tbl-wrap" id="rec-orders" hidden></div>
-    <details id="rec-reasons-box" hidden>
-      <summary>Why not a stock strategy? <span id="rec-reason-count"></span></summary>
-      <ul class="risks" id="rec-reasons"></ul>
-    </details>
-  </section>
 
-  <section class="sec" id="compare-sec" aria-labelledby="compare-h" hidden>
-    <div class="sec-head">
-      <h2 id="compare-h">Strategy comparison vs All Ords</h2>
-      <p class="sub" id="bench-note"></p>
-    </div>
-    <div class="filters">
-      <label>Period <select id="cmp-period">
-        <option value="walk_forward">Walk-forward 2019–2024</option>
-        <option value="hold_out">Hold-out 2024–2026</option>
-        <option value="full">Full 2016–2026</option>
-        <option value="design">Design 2016–2019</option>
-      </select></label>
-      <label>Capital <select id="cmp-setting"></select></label>
-    </div>
-    <div class="tbl-wrap" id="cmp-table"></div>
-    <p class="sub small">Net of the modelled broker's fees (see broker model below) and tiered slippage. Click a column to sort. <span class="pass-key">Highlighted</span> = passes all nine acceptance tests. Grey = not run (reason shown). Excess return is annualised vs VAS.AX with a 90% bootstrap interval.</p>
-    <div class="two-col" id="val-box"></div>
-  </section>
+    <section class="view" id="view-today" aria-labelledby="today-h" hidden>
+      <h2 id="today-h" class="vh">Today</h2>
+      <article class="card result" aria-labelledby="result-h">
+        <span class="eyebrow" id="result-eyebrow"></span>
+        <h2 id="result-h"></h2>
+        <p class="reason" id="result-reason"></p>
+        <p class="sub" id="result-limit"></p>
+      </article>
+      <div class="status-grid" id="status-grid"></div>
+      <section class="card" id="alloc-box" aria-labelledby="alloc-h" hidden>
+        <h3 id="alloc-h">Research book (hypothetical)</h3>
+        <div id="alloc"></div>
+      </section>
+      <section class="card" id="proposals-box" aria-labelledby="prop-h" hidden>
+        <h3 id="prop-h">Paper proposals (estimates, not orders)</h3>
+        <div id="proposals"></div>
+      </section>
+      <details class="card" id="why-box">
+        <summary>Why this result?</summary>
+        <div id="why"></div>
+      </details>
+      <p><a href="#/performance">Compare methods on Performance</a> · <a href="#/research">Full diagnostics on Research</a></p>
+    </section>
 
-  <section class="sec" id="hist-sec" aria-labelledby="hist-h" hidden>
-    <div class="sec-head">
-      <h2 id="hist-h">How it would have done</h2>
-      <p class="sub">Replay any strategy from the year you choose. Net of brokerage and slippage; VAS includes dividends.</p>
-    </div>
-    <div class="filters">
-      <label>Capital <select id="h-setting"></select></label>
-      <label>Strategy <select id="h-strat"></select></label>
-      <label>Starting <select id="h-start"></select></label>
-      <label id="h-tax-l" hidden>Tax <select id="h-tax"><option value="pre">Before tax</option><option value="post">After tax (est.)</option></select></label>
-    </div>
-    <div class="kpis" id="h-kpis"></div>
-    <div class="card">
-      <div class="legend" id="h-legend"></div>
-      <div class="chart" id="h-chart"></div>
-    </div>
-    <h3>Year by year</h3>
-    <div class="tbl-wrap" id="h-years"></div>
-    <details id="h-months-box">
-      <summary>What it held each month</summary>
-      <div class="tbl-wrap" id="h-months"></div>
-    </details>
-    <p class="sub small">Backtest on today's listed companies only: firms that later collapsed or delisted are missing, so these results are better than real trading would have been.
-      "After tax (est.)" deducts capital gains tax on each sale at your marginal rate (50% discount after 12 months, losses offset gains);
-      VAS is held throughout so it pays none. Dividend tax and franking are ignored for both. A rough guide, not tax advice.</p>
-  </section>
-
-  <section class="sec" aria-labelledby="picks-h">
-    <div class="sec-head">
-      <h2 id="picks-h">Legacy: weekly TimesFM picks</h2>
-      <p class="sub" id="picks-sub">Buy at the open, sell at the close after the holding period.</p>
-    </div>
-    <div class="banner legacy-note">The original weekly TimesFM strategy, kept for reference. Its weekly trading costs about 0.9% a week, so it is not recommended. See the recommendation above.
-    </div>
-    <div class="tickets" id="tickets"></div>
-  </section>
-
-  <section class="sec" aria-labelledby="perf-h">
-    <div class="sec-head">
-      <h2 id="perf-h">Legacy track record</h2>
-      <p class="sub" id="perf-sub">Replayed with the same rules, after costs.</p>
-    </div>
-    <div class="kpis" id="kpis"></div>
-    <div class="card">
-      <div class="card-head">
-        <div>
-          <h3>Growth of $100</h3>
-          <p class="sub" style="font-size:.84rem">Each line starts at 100 on the first rebalance date.</p>
-        </div>
-        <button class="toggle" id="eq-toggle" type="button" aria-pressed="false">Show as table</button>
+    <section class="view" id="view-performance" aria-labelledby="perf-h" hidden>
+      <div class="sec-head">
+        <h2 id="perf-h">Performance</h2>
+        <p class="sub" id="perf-scope"></p>
       </div>
-      <div class="legend" id="eq-legend"></div>
-      <div class="chart" id="eq-chart"></div>
-      <div class="tbl-wrap" id="eq-table" hidden></div>
-    </div>
-  </section>
+      <div class="tabs" role="tablist" aria-label="Ranking view">
+        <button class="btn" role="tab" id="tab-hist" aria-controls="panel-hist" type="button">Past profitability</button>
+        <button class="btn" role="tab" id="tab-ev" aria-controls="panel-ev" type="button">Evidence for future use</button>
+      </div>
+      <section id="panel-hist" role="tabpanel" aria-labelledby="tab-hist" class="sec">
+        <p>Which tested method made the most money in this historical simulation? <strong>Descriptive, not a forecast.</strong> Ranked by net profit in Australian dollars, after modelled trading costs.</p>
+        <div class="controls">
+          <label>Basis <select id="hist-basis"><option value="pre_tax">Before tax, after trading costs</option><option value="after_tax_estimate">Estimated tax overlay</option></select></label>
+          <label>Find a method <input type="search" id="hist-search" placeholder="e.g. momentum"></label>
+        </div>
+        <div id="hist-body"></div>
+      </section>
+      <section id="panel-ev" role="tabpanel" aria-labelledby="tab-ev" class="sec" hidden>
+        <p><strong>Qualification first; evidence score second.</strong> Methods are grouped by the program's own research checks, then ordered by a declared heuristic Evidence score /100 (before tax). It is not a chance of profit or a predicted return.</p>
+        <div id="ev-body"></div>
+      </section>
+      <section class="card" id="inspector" aria-labelledby="insp-h" hidden>
+        <p class="badge" id="insp-flag" hidden>Inspecting another method — Today's result is unchanged</p>
+        <h3 id="insp-h" tabindex="-1"></h3>
+        <div id="insp-body"></div>
+      </section>
+      <section class="sec" id="hist-sec" aria-labelledby="hist-h" hidden>
+        <h3 id="hist-h">History of the inspected method</h3>
+        <div class="controls">
+          <label>Starting <select id="h-start"></select></label>
+          <label id="h-tax-l">Tax <select id="h-tax"><option value="pre">Before tax</option><option value="post">Estimated tax overlay</option></select></label>
+          <fieldset class="controls" style="border:0;padding:0;margin:0"><legend class="small sub">Extra lines</legend>
+            <label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="x-ew"> Equal-weight universe (gross reference)</label>
+            <label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="x-aord"> ^AORD price index (no dividends)</label>
+          </fieldset>
+        </div>
+        <div class="card">
+          <div class="legend" id="h-legend"></div>
+          <div class="chart" id="h-chart"></div>
+          <p class="small sub" id="h-summary"></p>
+          <details><summary>Chart data as a table</summary><div class="tbl-wrap" id="h-table"></div></details>
+        </div>
+        <div class="tbl-wrap" id="h-years"></div>
+        <p class="small sub">Simulated on today's listed companies only (firms that later collapsed are missing), so results are likely better than real trading. Missing months are shown as gaps, never as 0%.</p>
+      </section>
+    </section>
 
-  <section class="sec" aria-labelledby="trades-h">
-    <div class="sec-head">
-      <h2 id="trades-h">Legacy recent trades</h2>
-      <p class="sub">Latest 30 backtest trades, newest first. P&amp;L includes brokerage on both legs.</p>
-    </div>
-    <div class="tbl-wrap" id="trades"></div>
-  </section>
+    <section class="view" id="view-research" aria-labelledby="res-h" hidden>
+      <div class="sec-head">
+        <h2 id="res-h">Research diagnostics</h2>
+        <p class="sub">Full checks, policy parameters and every metric. Technical terms are kept here.</p>
+      </div>
+      <div id="res-checks"></div>
+      <section class="sec" aria-labelledby="cmp-h">
+        <h3 id="cmp-h">All metrics by period</h3>
+        <div class="controls"><label>Comparison period <select id="cmp-period"></select></label></div>
+        <div id="cmp-table"></div>
+      </section>
+      <div id="res-extra"></div>
+      <details class="card" id="legacy">
+        <summary>Legacy archive: weekly TimesFM picks (not recommended)</summary>
+        <div class="banner">The original weekly TimesFM method, kept for reference. Its frequent trading costs about 0.9% a week, so it is not used for recommendations.</div>
+        <div id="legacy-body"></div>
+      </details>
+    </section>
 
-  <section class="sec" aria-labelledby="how-h">
-    <h2 id="how-h">How the recommendation is made</h2>
-    <ol class="steps">
-      <li><h3>Screen the market</h3><p>Each month-end, keep the 250 most-traded ASX stocks priced at $1+ with $2m+ median daily turnover and clean price history. ETFs are excluded.</p></li>
-      <li><h3>Score 22 strategy variants</h3><p>Risk-adjusted 12-month momentum, low volatility, a blend of both, and two TimesFM signals. Each uses 5 or 8 positions, with or without an All Ords 200-day trend filter.</p></li>
-      <li><h3>Trade slowly to cut costs</h3><p>Rebalance monthly. Buy only top-N names, keep them until they fall below rank 3N, never top up, and skip orders under $1,000.</p></li>
-      <li><h3>Prove it out of sample</h3><p>Pick the variant on 2016–2024 data, test it on the untouched 2024–2026 hold-out, and apply deflated Sharpe and overfitting checks. If anything fails, recommend the index ETF.</p></li>
-    </ol>
-  </section>
-
-  <section class="two-col">
-    <div class="sec">
-      <h2>Settings used</h2>
-      <dl class="settings" id="settings"></dl>
-    </div>
-    <div class="sec">
-      <h2>Run it yourself</h2>
-      <div class="cmds" id="cmds"></div>
-    </div>
-  </section>
-
-  <section class="sec" aria-labelledby="risk-h">
-    <h2 id="risk-h">Read before trading</h2>
-    <ul class="risks">
-      <li><b>Not financial advice.</b> This is a personal research project. Picks are model output, not recommendations to buy.</li>
-      <li><b>Past results do not predict future returns.</b> Six months is a short window; a strategy can beat the index by luck.</li>
-      <li><b>Survivorship bias.</b> The backtest only includes companies listed today, so stocks that collapsed and delisted are missing. Real results would likely be worse.</li>
-      <li><b>Costs scale with account size.</b> Brokerage is a fixed fee per order, so small accounts lose a far larger share to fees than the capital shown here.</li>
-      <li><b>Prices are end-of-day from Yahoo Finance</b> and can be late or wrong. Check the price before placing an order.</li>
-    </ul>
-  </section>
+    <section class="view" id="view-how" aria-labelledby="how-h" hidden>
+      <h2 id="how-h">How it works</h2>
+      <ol class="steps" id="steps"></ol>
+      <section class="sec" aria-labelledby="gloss-h">
+        <h3 id="gloss-h">Plain-language terms</h3>
+        <dl class="kv" id="glossary"></dl>
+      </section>
+      <section class="sec" aria-labelledby="risk-h">
+        <h3 id="risk-h">Read before using</h3>
+        <ul class="risks">
+          <li><b>Not financial advice.</b> A personal research project; results are simulations.</li>
+          <li><b>This program places no trades.</b> "LIVE" is a research tier, not a broker connection. Share quantities use adjusted research prices and are not executable.</li>
+          <li><b>Past results do not predict future returns.</b> July 2024 onwards has already been examined, so it is historical evidence, not an untouched test.</li>
+          <li><b>Survivorship bias.</b> Only companies listed today are included, so real results would likely be worse.</li>
+          <li><b>Estimated tax.</b> The tax overlay is a rough capital-gains estimate; dividend tax and franking are ignored.</li>
+          <li><b>Prices are end-of-day from Yahoo Finance</b> and can be late or wrong.</li>
+        </ul>
+      </section>
+      <section class="sec" aria-labelledby="run-h">
+        <h3 id="run-h">Run it yourself</h3>
+        <div id="cmds" class="sec"></div>
+      </section>
+    </section>
+  </main>
 
   <footer>
     <span id="foot-gen">—</span>
-    <span>Forecasts by <a href="https://github.com/google-research/timesfm" target="_blank" rel="noopener">TimesFM 2.5</a> (Apache-2.0 weights). Source code: <a id="repo-link" href="https://github.com/hughdwill-byte/ASX-Trading-Program" target="_blank" rel="noopener">ASX-Trading-Program</a>.</span>
+    <span>Forecasts by <a href="https://github.com/google-research/timesfm" target="_blank" rel="noopener">TimesFM 2.5</a> (legacy archive). Source code: <a href="https://github.com/hughdwill-byte/ASX-Trading-Program" target="_blank" rel="noopener">ASX-Trading-Program</a>.</span>
   </footer>
 </div>
 
 <script>
 (() => {
   "use strict";
+  const SUPPORTED_DISPLAY = ["asx_research_display_v1"];
   const SVG = "http://www.w3.org/2000/svg";
   const $ = (id) => document.getElementById(id);
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-
   function el(tag, attrs = {}, kids = []) {
     const n = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
-      if (k === "class") n.className = v; else if (k === "text") n.textContent = v; else n.setAttribute(k, v);
+      if (v == null || v === false) continue;
+      if (k === "class") n.className = v; else if (k === "text") n.textContent = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v === true ? "" : v);
     }
     for (const k of [].concat(kids)) if (k != null) n.append(k);
     return n;
   }
-  function s(tag, attrs = {}) {
-    const n = document.createElementNS(SVG, tag);
-    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
-    return n;
-  }
+  function s(tag, attrs = {}) { const n = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; }
   const fin = (x) => typeof x === "number" && isFinite(x);
-  const pct = (x, d = 2) => fin(x) ? `${x >= 0 ? "+" : "−"}${Math.abs(100 * x).toFixed(d)}%` : "n/a";
-  const money = (x) => fin(x) ? `${x < 0 ? "−" : ""}$${Math.abs(x).toLocaleString("en-AU", { maximumFractionDigits: 0 })}` : "n/a";
+  const pct = (x, d = 1) => fin(x) ? `${x >= 0 ? "+" : "−"}${Math.abs(100 * x).toFixed(d)}%` : "n/a";
+  const pctPlain = (x, d = 1) => fin(x) ? `${(100 * x).toFixed(d)}%` : "n/a";
+  const pp = (x) => fin(x) ? `${x >= 0 ? "+" : "−"}${Math.abs(100 * x).toFixed(1)} pts` : "n/a";
+  const aud = (x) => fin(x) ? `${x < 0 ? "−" : ""}A$${Math.abs(x).toLocaleString("en-AU", { maximumFractionDigits: 0 })}` : "n/a";
   const price = (x) => fin(x) ? `$${x < 1 ? x.toFixed(3) : x.toFixed(2)}` : "n/a";
+  // Calendar dates (YYYY-MM-DD) are Australian trading dates: format without shifting; timestamps use Australia/Sydney.
   const fmtDate = (iso, opts = { day: "numeric", month: "short", year: "numeric" }) =>
-    iso ? new Date(iso + (iso.length === 10 ? "T00:00:00" : "")).toLocaleDateString("en-AU", opts) : "—";
-  function arrow(x) {
-    if (!fin(x) || x === 0) return null;
-    return el("span", { class: `arrow ${x > 0 ? "up" : "down"}`, "aria-hidden": "true", text: x > 0 ? "▲" : "▼" });
-  }
+    iso ? new Date(iso.slice(0, 10) + "T00:00:00Z").toLocaleDateString("en-AU", { ...opts, timeZone: "UTC" }) : "—";
+  const fmtStamp = (iso) => iso ? new Date(iso).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: "Australia/Sydney" }) + " Sydney time" : "—";
+  const settingLabel = (k, sc) => { const [cap, core] = k.split("_core"); return `A$${Number(cap).toLocaleString("en-AU")}${Number(core) ? `, ${Math.round(core * 100)}% reserved for the VAS core ETF` : ", all in shares"}${sc && sc.broker ? ` · ${BROKERS[sc.broker] || sc.broker}` : ""}`; };
+  const BROKERS = { stake: "Stake fee model (A$3/order)", cmc: "CMC fee model", flat: "flat A$6.50/order" };
+  const announce = (t) => { $("announce").textContent = ""; setTimeout(() => { $("announce").textContent = t; }, 30); };
 
-  // ---------- theme toggle ----------
+  // ---------- theme (no focus loss; re-render keeps state) ----------
   const root = document.documentElement;
   try { const t = localStorage.getItem("theme"); if (t) root.dataset.theme = t; } catch (e) {}
+  const isDark = () => root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  const syncThemeBtn = () => { const d = isDark(); $("theme-btn").textContent = d ? "Light theme" : "Dark theme"; $("theme-btn").setAttribute("aria-pressed", String(d)); };
+  syncThemeBtn();
   $("theme-btn").addEventListener("click", () => {
-    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-    root.dataset.theme = dark ? "light" : "dark";
+    root.dataset.theme = isDark() ? "light" : "dark";
     try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
-    if (DATA) render(DATA);
+    syncThemeBtn(); if (DATA) renderCharts();
   });
 
-  // ---------- generic line chart (one y-axis, crosshair tooltip) ----------
+  // ---------- state in the URL (public context only: view, scenario, method, basis, tab) ----------
+  const VIEWS = ["today", "performance", "research", "how"];
+  function readState() {
+    const [path, q] = location.hash.replace(/^#\/?/, "").split("?");
+    const p = new URLSearchParams(q || "");
+    return { view: VIEWS.includes(path) ? path : "today", s: p.get("s"), m: p.get("m"), b: p.get("b") || "pre_tax", t: p.get("t") || "hist" };
+  }
+  function writeState(patch, push = true) {
+    const st = { ...readState(), ...patch };
+    const q = new URLSearchParams();
+    for (const k of ["s", "m", "b", "t"]) if (st[k]) q.set(k, st[k]);
+    const h = `#/${st.view}?${q}`;
+    if (location.hash !== h) { if (push) history.pushState(null, "", h); else history.replaceState(null, "", h); }
+    render();
+  }
+
+  // ---------- chart (keyboard crosshair, dash patterns, adaptive ticks) ----------
   function lineChart(host, o) {
     host.replaceChildren();
     const W = Math.max(280, host.clientWidth || 600), H = o.height;
-    const m = { t: 10, r: o.endLabels ? 64 : 12, b: 22, l: o.yWidth || 44 };
-    const n = o.dates.length;
-    const vals = [];
+    const m = { t: 10, r: 70, b: 24, l: 56 };
+    const n = o.dates.length, vals = [];
     o.series.forEach((sr) => sr.values.forEach((v) => fin(v) && vals.push(v)));
-    if (o.band) [o.band.lo, o.band.hi].forEach((a) => a.forEach((v) => fin(v) && vals.push(v)));
+    if (!vals.length) { host.append(el("p", { class: "sub", text: "No chart data available." })); return; }
     if (fin(o.baseline)) vals.push(o.baseline);
     let lo = Math.min(...vals), hi = Math.max(...vals);
     const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.05 || 1; lo -= pad; hi += pad;
     const x = (i) => m.l + (n <= 1 ? 0 : (i / (n - 1)) * (W - m.l - m.r));
     const y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * (H - m.t - m.b);
     const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": o.label });
-
-    // grid + y ticks: 4 clean steps
     const step = niceStep((hi - lo) / 4);
-    const dec = Math.max(0, -Math.floor(Math.log10(step)));
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
       svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: css("--grid"), "stroke-width": 1 }));
-      const t = s("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }); t.textContent = o.tickDecimals ? v.toFixed(dec) : o.yfmt(v); svg.append(t);
+      const t = s("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }); t.textContent = o.yfmt(v); svg.append(t);
     }
     if (fin(o.baseline)) svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y(o.baseline), y2: y(o.baseline), stroke: css("--axis"), "stroke-width": 1 }));
-    // x ticks: up to 5 evenly spaced dates
-    const xt = Math.max(2, Math.min(5, n, Math.floor((W - m.l - m.r) / 110) + 1));
-    for (let k = 0; k < xt; k++) {
-      const i = Math.round((k / Math.max(1, xt - 1)) * (n - 1));
-      const t = s("text", { x: x(i), y: H - 4, "text-anchor": k === 0 ? "start" : k === xt - 1 ? "end" : "middle" });
-      t.textContent = fmtDate(o.dates[i], { day: "numeric", month: "short" }); svg.append(t);
-    }
-    if (fin(o.split)) svg.append(s("line", { x1: x(o.split), x2: x(o.split), y1: m.t, y2: H - m.b, stroke: css("--axis"), "stroke-width": 1 }));
-
-    if (o.band) {
-      let top = "", bot = "";
-      o.band.lo.forEach((v, i) => { if (fin(v) && fin(o.band.hi[i])) { top += `${top ? "L" : "M"}${x(i)},${y(o.band.hi[i])}`; bot = `L${x(i)},${y(v)}` + bot; } });
-      if (top) svg.append(s("path", { d: top + bot + "Z", fill: o.band.color, stroke: "none" }));
-    }
+    const spanYears = n > 1 ? (new Date(o.dates[n - 1]) - new Date(o.dates[0])) / 3.156e10 : 0;
+    const ticks = [];
+    if (spanYears > 2.5) { let last = null; o.dates.forEach((d, i) => { const yr = d.slice(0, 4); if (yr !== last) { last = yr; if (i > 0) ticks.push([i, yr]); } }); }
+    else { const k = Math.max(2, Math.min(5, Math.floor((W - m.l - m.r) / 110) + 1)); for (let j = 0; j < k; j++) { const i = Math.round((j / (k - 1)) * (n - 1)); ticks.push([i, fmtDate(o.dates[i], { month: "short", year: "numeric" })]); } }
+    const room = Math.floor((W - m.l - m.r) / 44), every = Math.max(1, Math.ceil(ticks.length / Math.max(1, room)));
+    ticks.filter((_, j) => j % every === 0).forEach(([i, label]) => { const t = s("text", { x: x(i), y: H - 4, "text-anchor": "middle" }); t.textContent = label; svg.append(t); });
     o.series.forEach((sr) => {
       let d = "", pen = false;
       sr.values.forEach((v, i) => { if (fin(v)) { d += `${pen ? "L" : "M"}${x(i)},${y(v)}`; pen = true; } else pen = false; });
-      svg.append(s("path", { d, fill: "none", stroke: sr.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
-      const li = lastIdx(sr.values);
-      if (li >= 0 && sr.endDot !== false) svg.append(s("circle", { cx: x(li), cy: y(sr.values[li]), r: 4, fill: sr.color, stroke: css("--surface"), "stroke-width": 2 }));
+      svg.append(s("path", { d, fill: "none", stroke: sr.color, "stroke-width": sr.width || 2, "stroke-dasharray": sr.dash || "none", "stroke-linejoin": "round", "stroke-linecap": "round" }));
     });
-    if (o.endLabels) placeEndLabels(svg, o.series, x, y, W - m.r + 8, o.yfmt);
-
-    // crosshair
+    const items = o.series.map((sr) => { const i = lastIdx(sr.values); return i < 0 ? null : { sr, i, y0: y(sr.values[i]), y: y(sr.values[i]) }; }).filter(Boolean).sort((a, b) => a.y - b.y);
+    for (let k = 1; k < items.length; k++) if (items[k].y - items[k - 1].y < 15) items[k].y = items[k - 1].y + 15;
+    items.forEach((it) => { const t = s("text", { x: W - m.r + 8, y: it.y + 4, class: "end-label" }); t.textContent = o.yfmt(it.sr.values[it.i]); svg.append(t); });
     const cross = s("line", { y1: m.t, y2: H - m.b, stroke: css("--axis"), "stroke-width": 1, visibility: "hidden" });
-    const hit = s("rect", { x: m.l, y: 0, width: W - m.l - m.r, height: H, fill: "transparent", tabindex: 0 });
-    svg.append(cross, hit);
-    host.append(svg);
-    const tip = el("div", { class: "tip", hidden: "" }); host.append(tip);
+    const hit = s("rect", { x: m.l, y: 0, width: W - m.l - m.r, height: H, fill: "transparent", tabindex: 0, role: "slider",
+      "aria-label": `${o.label}. Use left and right arrow keys to read values.`, "aria-valuemin": 0, "aria-valuemax": n - 1 });
+    svg.append(cross, hit); host.append(svg);
+    const tip = el("div", { class: "tip", hidden: true }); host.append(tip);
+    let cur = n - 1;
     const show = (i) => {
       cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
-      const rows = [el("div", { class: "t-date", text: fmtDate(o.dates[i], { weekday: "short", day: "numeric", month: "short", year: "numeric" }) })];
-      o.series.forEach((sr) => fin(sr.values[i]) && rows.push(row(sr.label, o.yfmt(sr.values[i]), sr.color)));
-      if (o.band && fin(o.band.lo[i]) && o.band.tipLabel) rows.push(row(o.band.tipLabel, `${o.yfmt(o.band.lo[i])} – ${o.yfmt(o.band.hi[i])}`, null));
+      const rows = [el("div", { class: "t-date", text: fmtDate(o.dates[i]) })];
+      const txt = [fmtDate(o.dates[i])];
+      o.series.forEach((sr) => { if (fin(sr.values[i])) { rows.push(el("div", { class: "row" }, [el("span", { text: sr.label }), el("b", { text: o.yfmt(sr.values[i]) })])); txt.push(`${sr.label} ${o.yfmt(sr.values[i])}`); } });
       tip.replaceChildren(...rows); tip.hidden = false;
+      hit.setAttribute("aria-valuenow", i); hit.setAttribute("aria-valuetext", txt.join(", "));
       const left = x(i) * host.clientWidth / W;
-      tip.style.left = `${Math.min(Math.max(0, left + 12), host.clientWidth - tip.offsetWidth)}px`;
-      tip.style.top = "4px";
+      tip.style.left = `${Math.min(Math.max(0, left + 12), host.clientWidth - tip.offsetWidth)}px`; tip.style.top = "4px";
     };
     const hide = () => { cross.setAttribute("visibility", "hidden"); tip.hidden = true; };
-    let cur = n - 1;
-    hit.addEventListener("pointermove", (e) => {
-      const r = svg.getBoundingClientRect();
-      const px = (e.clientX - r.left) * W / r.width;
-      cur = Math.max(0, Math.min(n - 1, Math.round(((px - m.l) / (W - m.l - m.r)) * (n - 1)))); show(cur);
-    });
-    hit.addEventListener("pointerleave", hide);
-    hit.addEventListener("focus", () => show(cur));
-    hit.addEventListener("blur", hide);
+    hit.addEventListener("pointermove", (e) => { const r = svg.getBoundingClientRect(); const px = (e.clientX - r.left) * W / r.width; cur = Math.max(0, Math.min(n - 1, Math.round(((px - m.l) / (W - m.l - m.r)) * (n - 1)))); show(cur); });
+    hit.addEventListener("pointerleave", hide); hit.addEventListener("focus", () => show(cur)); hit.addEventListener("blur", hide);
     hit.addEventListener("keydown", (e) => {
       if (e.key === "ArrowLeft") { cur = Math.max(0, cur - 1); show(cur); e.preventDefault(); }
       if (e.key === "ArrowRight") { cur = Math.min(n - 1, cur + 1); show(cur); e.preventDefault(); }
     });
   }
-  function row(label, value, color) {
-    const key = el("span", {}, [color ? el("i", { style: `display:inline-block;width:12px;height:2px;border-radius:2px;background:${color}` }) : null, label]);
-    return el("div", { class: "row" }, [key, el("b", { text: value })]);
-  }
   function lastIdx(a) { for (let i = a.length - 1; i >= 0; i--) if (fin(a[i])) return i; return -1; }
-  function niceStep(raw) {
-    const p = Math.pow(10, Math.floor(Math.log10(raw || 1)));
-    const f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
-  }
-  function placeEndLabels(svg, series, x, y, lx, fmt) {
-    // nudge colliding labels apart with a leader line back to the line end
-    const items = series.map((sr) => { const i = lastIdx(sr.values); return i < 0 ? null : { sr, i, y0: y(sr.values[i]), y: y(sr.values[i]) }; }).filter(Boolean)
-      .sort((a, b) => a.y - b.y);
-    for (let k = 1; k < items.length; k++) if (items[k].y - items[k - 1].y < 14) items[k].y = items[k - 1].y + 14;
-    items.forEach((it) => {
-      if (Math.abs(it.y - it.y0) > 2) svg.append(s("line", { x1: x(it.i) + 5, y1: it.y0, x2: lx - 2, y2: it.y, stroke: css("--axis"), "stroke-width": 1 }));
-      const t = s("text", { x: lx, y: it.y + 4, class: "end-label" }); t.textContent = fmt(it.sr.values[it.i]); svg.append(t);
-    });
-  }
+  function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw || 1))); const f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; }
 
-  // ---------- sections ----------
-  function renderHeader(d) {
-    const age = (Date.now() - new Date(d.data_date + "T18:00:00+10:00")) / 864e5;
-    const pill = $("data-pill");
-    pill.classList.remove("fresh", "stale");
-    pill.classList.add(age <= 4 ? "fresh" : "stale");
-    $("data-date").textContent = `Prices to ${fmtDate(d.data_date)}${age > 4 ? " · stale" : ""}`;
-    $("universe-pill").textContent = `${d.universe_size} of ${d.symbols_loaded} stocks pass the screen`;
-    $("foot-gen").textContent = `Generated ${new Date(d.generated_at).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" })} · model + backtests ran in ${Math.round(d.runtime_seconds.model_and_backtests / 60)} min`;
-    const b = $("banner");
-    if (d.demo) { b.hidden = false; b.textContent = "Demo data: these numbers come from synthetic prices and an untrained model, only to show the layout. The live site shows real results after the first daily run."; }
-    else if (age > 4) { b.hidden = false; b.textContent = "These picks are more than four days old. The daily update may have failed; check the Actions tab on GitHub."; }
-    else b.hidden = true;
-  }
-
-  function renderPicks(d) {
-    const st = d.settings, box = $("tickets");
-    $("picks-sub").textContent = `Buy at the open, sell at the close ${st.hold} sessions later. Sized for $${st.capital.toLocaleString("en-AU")} capital with ${Math.round(st.min_cash_buffer * 100)}% kept in cash.`;
-    box.replaceChildren();
-    if (!d.recommendations.length) {
-      box.append(el("div", { class: "empty-picks", text: "No stock has a forecast gain larger than trading costs today. The model's call is to stay in cash." }));
-      return;
-    }
-    d.recommendations.forEach((p, k) => {
-      const chart = el("div", { class: "chart" });
-      const card = el("article", { class: "ticket" }, [
-        el("div", { class: "t-top" }, [
-          el("div", { style: "min-width:0" }, [
-            el("div", { class: "t-rank", text: `#${k + 1} · ${p.industry || "ASX"}` }),
-            el("div", { class: "t-sym", text: p.symbol, style: "margin-top:6px" }),
-            el("div", { class: "t-name", text: p.name || "" }),
-          ]),
-          el("div", { class: "t-fc" }, [
-            el("div", { class: "big", text: pct(p.expected) }),
-            el("div", { class: "lbl", text: `median forecast, ${st.hold} sessions` }),
-          ]),
-        ]),
-        chart,
-        el("div", { class: "mini-legend" }, [
-          el("span", { class: "key" }, [el("i", { style: `background:${css("--hist")}` }), "Close"]),
-          el("span", { class: "key" }, [el("i", { style: `background:${css("--accent")}` }), "Forecast median"]),
-          el("span", { class: "key" }, [el("i", { class: "band", style: `background:${css("--accent-wash")}` }), "10–90% range"]),
-        ]),
-        el("dl", { class: "kv" }, [
-          kv("Last close", price(p.price)),
-          kv("10–90% range", `${pct(p.q10, 0)} to ${pct(p.q90, 0)}`),
-          kv("Score", fin(p.score) ? p.score.toFixed(2) : "n/a"),
-          kv("Buy qty", p.qty.toLocaleString("en-AU")),
-          kv("Spend", money(p.spend)),
-          kv("Fees", money(2 * st.trade_cost)),
-        ]),
-      ]);
-      box.append(card);
-      const h = p.history, f = p.forecast;
-      const dates = h.dates.slice(-60).concat(f.dates);
-      const hist = h.close.slice(-60);
-      const pad = Array(f.dates.length).fill(null);
-      const lastClose = hist[hist.length - 1];
-      const lead = Array(hist.length - 1).fill(null);
-      requestAnimationFrame(() => lineChart(chart, {
-        label: `${p.symbol}: last 60 closes and ${st.hold}-session TimesFM forecast`,
-        height: 150, yWidth: 48, dates, split: hist.length - 1, tickDecimals: true,
-        yfmt: (v) => v < 1 ? v.toFixed(3) : v.toFixed(2),
-        series: [
-          { label: "Close", color: css("--hist"), values: hist.concat(pad), endDot: false },
-          { label: "Forecast", color: css("--accent"), values: lead.concat([lastClose], f.median) },
-        ],
-        band: { lo: lead.concat([lastClose], f.q10), hi: lead.concat([lastClose], f.q90), color: css("--accent-wash"), tipLabel: "Range" },
-      }));
-    });
-  }
-  function kv(k, v) { return el("div", {}, [el("dt", { text: k }), el("dd", { text: v })]); }
-
-  const SERIES = [
-    { key: "timesfm", label: "TimesFM strategy", color: "--s1" },
-    { key: "benchmark", label: "Index", color: "--s2" },
-    { key: "universe", label: "All screened stocks (equal weight)", color: "--s3" },
-    { key: "momentum", label: "Momentum baseline", color: "--s4" },
-  ];
-  function renderPerf(d) {
-    const bt = d.backtest, st = d.settings, t = bt.timesfm;
-    const strat = t.strategy, bench = t.benchmark, uni = t.universe_equal_weight, mom = bt.momentum.strategy;
-    $("perf-sub").textContent = `${fmtDate(bt.start)} to ${fmtDate(bt.end)} · top ${st.top}, ${st.hold}-session holds · $${st.trade_cost} per order + ${st.slippage_bps / 100}% slippage each side.`;
-    const k = $("kpis"); k.replaceChildren();
-    const vs = (other, name) => {
-      if (!other || !fin(other.total_return)) return el("span", { text: `${name} unavailable` });
-      const diff = strat.total_return - other.total_return;
-      return el("span", {}, [arrow(diff), ` ${diff >= 0 ? "+" : "−"}${Math.abs(diff * 100).toFixed(1)} pts vs ${name}`]);
-    };
-    k.append(
-      tile("TimesFM strategy return", pct(strat.total_return, 1), vs(bench, `index (${st.benchmark})`), true),
-      tile(`Index ${st.benchmark}`, bench ? pct(bench.total_return, 1) : "n/a", el("span", { text: "Buy and hold, same dates" })),
-      tile("All screened stocks", pct(uni.total_return, 1), el("span", { text: "Equal weight, no costs" })),
-      tile("Momentum baseline", pct(mom.total_return, 1), el("span", { text: "20-day winners, same costs" })),
-      tile("Sharpe ratio", fin(strat.sharpe) ? strat.sharpe.toFixed(2) : "n/a", el("span", { text: bench && fin(bench.sharpe) ? `Index ${bench.sharpe.toFixed(2)}` : "Annualised" })),
-      tile("Worst drawdown", pct(strat.max_drawdown, 1), el("span", { text: bench ? `Index ${pct(bench.max_drawdown, 1)}` : "Peak to trough" })),
-      tile("Winning trades", fin(t.hit_rate) ? `${Math.round(t.hit_rate * 100)}%` : "n/a", el("span", { text: `of ${t.trades_count} trades` })),
-      tile("Average trade", pct(t.avg_trade_return), el("span", { text: "Before brokerage" })),
-    );
-
-    const c = bt.curves, avail = SERIES.filter((sr) => c[sr.key]).map((sr) => sr.key === "benchmark" ? { ...sr, label: `Index ${st.benchmark}` } : sr);
-    const legend = $("eq-legend"); legend.replaceChildren(...avail.map((sr) =>
-      el("span", { class: "key" }, [el("i", { style: `background:${css(sr.color)}` }), sr.label])));
-    lineChart($("eq-chart"), {
-      label: "Growth of $100 for the TimesFM strategy, index, screened universe and momentum baseline",
-      height: 300, dates: c.dates, baseline: 100, endLabels: true, yfmt: (v) => v.toFixed(0),
-      series: avail.map((sr) => ({ label: sr.label, color: css(sr.color), values: c[sr.key].slice(0, c.dates.length) })),
-    });
-    const tbl = el("table", {}, [
-      el("thead", {}, el("tr", {}, [el("th", { text: "Date" }), ...avail.map((sr) => el("th", { class: "r", text: sr.label }))])),
-      el("tbody", {}, c.dates.map((dt, i) => el("tr", {}, [el("td", { class: "num", text: dt }),
-        ...avail.map((sr) => el("td", { class: "num r", text: fin(c[sr.key][i]) ? c[sr.key][i].toFixed(1) : "n/a" }))]))),
-    ]);
-    $("eq-table").replaceChildren(tbl);
-  }
-  function tile(label, value, delta, hero) {
-    return el("div", { class: `kpi${hero ? " hero" : ""}` }, [el("span", { class: "eyebrow", text: label }), el("span", { class: "v", text: value }), el("span", { class: "d" }, delta)]);
-  }
-
-  function renderTrades(d) {
-    const rows = d.backtest.recent_trades;
-    if (!rows.length) { $("trades").replaceChildren(el("p", { style: "padding:16px", class: "sub", text: "No trades in the backtest window." })); return; }
-    const head = ["Signal", "Exit", "Stock", "Forecast", "Actual", "P&L"];
-    $("trades").replaceChildren(el("table", {}, [
-      el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { class: i > 2 ? "r" : "", text: h })))),
-      el("tbody", {}, rows.map((t) => el("tr", {}, [
-        el("td", { class: "num", text: t.signal_date }), el("td", { class: "num", text: t.exit_date }),
-        el("td", { class: "mono", text: t.symbol }),
-        el("td", { class: "num r", text: pct(t.expected) }),
-        el("td", { class: "num r" }, [arrow(t.return), ` ${pct(t.return)}`]),
-        el("td", { class: "num r", text: money(t.pnl) }),
-      ]))),
-    ]));
-  }
-
-  // ---------- recommendation + strategy comparison (strategy v2) ----------
-  const TIER_TEXT = { LIVE: "LIVE strategy", PAPER: "Paper-tracking a candidate", FALLBACK: "Index ETF" };
-  function renderRec(d) {
-    const r = d.recommendation;
-    $("rec").hidden = !r;
-    if (!r) return;
-    const tier = r.tier || "FALLBACK";
-    $("rec-tier").className = `tier ${tier}`;
-    $("rec-tier-text").textContent = TIER_TEXT[tier] || tier;
-    $("rec-asof").textContent = r.as_of ? `As of ${fmtDate(r.as_of)}` : "";
-    $("rec-action").textContent = r.action_text || "";
-    const orders = d.paper_proposals || d.orders_next_open || [];
-    $("rec-orders").hidden = !orders.length;
-    if (orders.length) {
-      $("rec-orders").replaceChildren(el("p", { class: "sub small", text: "Paper proposals: estimates for the hypothetical research book (adjusted prices), not broker orders. No orders are placed by this program." }), el("table", {}, [
-        el("thead", {}, el("tr", {}, ["Side", "Stock", "Shares", "Est. price", "Est. cost"].map((h, i) => el("th", { class: i > 1 ? "r" : "", text: h })))),
-        el("tbody", {}, orders.map((o) => el("tr", {}, [
-          el("td", { text: o.side }), el("td", { class: "mono", text: o.ticker }),
-          el("td", { class: "num r", text: String(o.shares) }), el("td", { class: "num r", text: price(o.est_price) }),
-          el("td", { class: "num r", text: money(o.est_cost) }),
-        ]))),
-      ]));
-    }
-    const reasons = r.reasons || [];
-    $("rec-reasons-box").hidden = !reasons.length || tier === "LIVE";
-    $("rec-reason-count").textContent = `(${reasons.length} test${reasons.length === 1 ? "" : "s"} failed)`;
-    $("rec-reasons").replaceChildren(...reasons.map((x) => el("li", { text: x })));
-  }
-
-  const CMP_COLS = [
-    ["id", "Strategy", (v) => v],
-    ["cagr", "CAGR", (v) => pct(v, 1)],
-    ["sharpe", "Sharpe", (v) => fin(v) ? v.toFixed(2) : "n/a"],
-    ["mdd", "Max DD", (v) => pct(v, 1)],
-    ["cagr_after_tax", "After tax", (v) => pct(v, 1)],
-    ["excess_vs_bench", "Excess vs VAS", null],
-    ["turnover", "Turnover", (v) => fin(v) ? `${v.toFixed(1)}×` : "—"],
-    ["orders_per_year", "Orders/yr", (v) => fin(v) ? v.toFixed(0) : "—"],
-    ["cost_drag", "Cost drag", (v) => fin(v) ? pct(v, 2).replace("+", "") : "—"],
-    ["hit_rate", "Months ahead", (v) => fin(v) ? `${Math.round(v * 100)}%` : "n/a"],
-  ];
-  const BASE_LABELS = { BENCH_TR: "VAS.AX buy-and-hold (benchmark)", AORD_PRICE: "^AORD price index (no dividends)", EW_UNIV: "Equal-weight universe (gross)", WF_SELECT: "Walk-forward selection" };
-  let cmpSort = { key: "sharpe", dir: -1 };
-  function renderCompare(d) {
-    const rows = d.strategy_comparison || [];
-    $("compare-sec").hidden = !rows.length;
-    if (!rows.length) return;
-    $("bench-note").textContent = d.benchmark_note || "";
-    const sel = $("cmp-setting");
-    if (!sel.options.length) {
-      const settings = [...new Set(rows.map((r) => r.setting))];
-      const label = (s) => { const [cap, core] = s.split("_core"); return `A$${Number(cap).toLocaleString("en-AU")}${Number(core) ? `, ${Math.round(core * 100)}% core ETF` : ", all stocks"}`; };
-      settings.forEach((s) => sel.append(el("option", { value: s, text: label(s) })));
-      const want = d.recommendation && d.recommendation.setting;
-      if (want && settings.includes(want)) sel.value = want;
-      sel.addEventListener("change", () => renderCompare(DATA));
-      $("cmp-period").addEventListener("change", () => renderCompare(DATA));
-    }
-    const period = $("cmp-period").value, setting = sel.value;
-    let view = rows.filter((r) => r.setting === setting && (r.period === period || (r.skipped_reason && !fin(r.cagr) && r.period === "full")));
-    view.sort((a, b) => {
-      const x = a[cmpSort.key], y = b[cmpSort.key];
-      if (cmpSort.key === "id") return cmpSort.dir * String(x).localeCompare(String(y));
-      return cmpSort.dir * ((fin(x) ? x : -Infinity) - (fin(y) ? y : -Infinity));
-    });
-    const head = el("tr", {}, CMP_COLS.map(([key, label], i) => {
-      const th = el("th", { class: `sortable${i ? " r" : ""}`, text: label, tabindex: "0", scope: "col" });
-      if (cmpSort.key === key) th.setAttribute("aria-sort", cmpSort.dir < 0 ? "descending" : "ascending");
-      const go = () => { cmpSort = { key, dir: cmpSort.key === key ? -cmpSort.dir : (key === "id" ? 1 : -1) }; renderCompare(DATA); };
-      th.addEventListener("click", go); th.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), go()));
-      return th;
-    }));
-    const body = view.map((r) => {
-      const skipped = r.skipped_reason && !fin(r.cagr);
-      const allPass = r.passes && Object.values(r.passes).every(Boolean);
-      const cls = [skipped ? "skip" : "", allPass ? "pass" : "", BASE_LABELS[r.id] ? "base" : ""].join(" ").trim();
-      const cells = CMP_COLS.map(([key, , fmt], i) => {
-        if (key === "id") {
-          const name = el("td", { text: BASE_LABELS[r.id] || strategyLabel(r.id), title: r.id });
-          if (r.is_frozen) name.append(el("span", { class: "badge", text: "SELECTED" }));
-          return name;
-        }
-        if (skipped) return i === 1 ? el("td", { colspan: String(CMP_COLS.length - 1), text: r.skipped_reason }) : null;
-        if (key === "excess_vs_bench") {
-          const ci = fin(r.excess_ci_lo) ? ` [${pct(r.excess_ci_lo, 1)}, ${pct(r.excess_ci_hi, 1)}]` : "";
-          return el("td", { class: "num r", text: r.id === "BENCH_TR" ? "—" : `${pct(r.excess_vs_bench, 1)}${ci}` });
-        }
-        return el("td", { class: "num r", text: fmt(r[key]) });
-      }).filter(Boolean);
-      return el("tr", { class: cls }, cells);
-    });
-    $("cmp-table").replaceChildren(el("table", {}, [el("thead", {}, head), el("tbody", {}, body)]));
-    renderValidation(d, setting);
-  }
-
-  function renderValidation(d, setting) {
-    const v = (d.validation_summary || {})[setting], ic = d.signal_ic || {};
-    const box = $("val-box"); box.replaceChildren();
-    const brokerNames = { stake: "Stake (A$3 per order)", cmc: "CMC Invest (free buys up to A$1,000)", flat: "Flat A$6.50 per order" };
-    if (d.broker) box.append(el("p", { class: "sub small", text: `Broker model: ${brokerNames[d.broker] || d.broker}. Fees are from a research report; check the broker's site.` }));
-    if (v && v.frozen) {
-      const dsr = v.dsr_frozen || {}, pbo = v.pbo || {}, nb = v.neighbours || [], sv = v.survivorship || {};
-      box.append(el("div", { class: "val-card" }, [
-        el("h3", { text: "Overfitting checks for the selected variant" }),
-        el("dl", { class: "settings" }, [
-          ["Selected", `${v.frozen.variant} (chosen on data before Jul 2024)`],
-          ["Deflated Sharpe", fin(dsr.dsr) ? `${dsr.dsr.toFixed(2)} (needs ≥ 0.95, ${dsr.trials} trials)` : "n/a"],
-          ["Overfitting probability", fin(pbo.pbo) ? `${Math.round(pbo.pbo * 100)}% (needs ≤ 25%)` : "n/a"],
-          ["Neighbours that also win", `${nb.filter((n) => n.passes_a_wf).length} of ${nb.length} (needs 2)`],
-          ["Excess after 1.5% / 3% haircut", `${pct(sv.minus_1_5pct, 1)} / ${pct(sv.minus_3pct, 1)}`],
-          ["Walk-forward picks", (v.walk_forward_picks || []).map((p) => `${p.year}: ${p.variant}`).join(", ")],
-        ].flatMap(([k, x]) => [el("dt", { text: k }), el("dd", { text: x })])),
-      ]));
-    }
-    const sigs = Object.entries(ic);
-    if (sigs.length) {
-      box.append(el("div", { class: "val-card" }, [
-        el("h3", { text: "Does each signal predict next month?" }),
-        el("p", { class: "sub small", text: "Rank IC: correlation between this month's score and next month's return vs VAS. |t| above 2 suggests a real effect." }),
-        el("div", { class: "tbl-wrap" }, el("table", {}, [
-          el("thead", {}, el("tr", {}, ["Signal", "Mean IC", "t-stat", "Months +"].map((h, i) => el("th", { class: i ? "r" : "", text: h })))),
-          el("tbody", {}, sigs.map(([k, x]) => el("tr", {}, [
-            el("td", { class: "mono", text: k }), el("td", { class: "num r", text: fin(x.mean_ic) ? x.mean_ic.toFixed(3) : "n/a" }),
-            el("td", { class: "num r", text: fin(x.nw_t) ? x.nw_t.toFixed(2) : "n/a" }),
-            el("td", { class: "num r", text: fin(x.pct_positive) ? `${Math.round(x.pct_positive * 100)}%` : "n/a" }),
-          ]))),
-        ])),
-      ]));
-    }
-  }
-
-  // ---------- historical replay ----------
-  const SIGNAL_NAMES = { RAMOM: "Risk-adjusted momentum", RESMOM: "Residual momentum", COMBO: "Momentum + low-vol blend", LOWVOL: "Low volatility",
-    TFM_REL: "TimesFM (vs index)", TFM_RAW: "TimesFM (price)" };
-  function strategyLabel(id) {
-    const o = /^OPT_([A-Z_]+?)_(nocap|cap\d+)_(var|ew|ivol)(_rank)?/.exec(id || "");
-    if (o) {
-      const size = { var: "risk/cost-optimised weights", ew: "equal weights", ivol: "inverse-volatility weights" }[o[3]];
-      return [SIGNAL_NAMES[o[1]] || o[1], o[2] === "nocap" ? "no holding cap" : `at most ${o[2].slice(3)} stocks`, size,
-        o[4] ? "rank-selected" : "optimiser-selected", "research only"].join(" · ");
-    }
-    const m = /^([A-Z_]+?)_N(\d+)_(reg|noreg)_B(\d+)(_SI)?(_Q)?(_TAX)?/.exec(id || "");
-    if (!m) return id;
-    const parts = [SIGNAL_NAMES[m[1]] || m[1], `${m[2]} stocks`, m[3] === "reg" ? "trend filter" : "no trend filter"];
-    if (m[4] === "1") parts.push("no hold buffer");
-    if (m[5]) parts.push("short-interest screen");
-    if (m[6]) parts.push("quarterly");
-    if (m[7]) parts.push("tax-aware");
-    return parts.join(" · ");
-  }
-  const settingLabel = (s) => { const [cap, core] = s.split("_core"); return `A$${Number(cap).toLocaleString("en-AU")}${Number(core) ? `, ${Math.round(core * 100)}% core ETF` : ", all stocks"}`; };
-  const HIST_SERIES = [
-    { key: "strategy", label: "Strategy", color: "--s1" },
-    { key: "BENCH_TR", label: "VAS (All Ords proxy, with dividends)", color: "--s2" },
-    { key: "EW_UNIV", label: "All screened stocks (equal weight)", color: "--s3" },
-    { key: "AORD_PRICE", label: "^AORD price index (no dividends)", color: "--s4" },
-  ];
-  let histInit = false;
-  function renderHistory(d) {
-    const h = d.history;
-    $("hist-sec").hidden = !h || !h.settings;
-    if (!h || !h.settings) return;
-    const selSet = $("h-setting"), selStrat = $("h-strat"), selStart = $("h-start");
-    const fillStrategies = () => {
-      const st = h.settings[selSet.value];
-      const frozen = (((d.validation_summary || {})[selSet.value] || {}).frozen || {}).variant;
-      const ids = Object.keys(st.strategies).sort((a, b) => strategyLabel(a).localeCompare(strategyLabel(b)));
-      selStrat.replaceChildren(...ids.map((id) => el("option", { value: id, text: (id === frozen ? "★ " : "") + strategyLabel(id) })));
-      if (frozen && ids.includes(frozen)) selStrat.value = frozen;
-      const years = [...new Set(st.dates.map((x) => x.slice(0, 4)))];
-      const keep = selStart.value;
-      selStart.replaceChildren(...years.map((y) => el("option", { value: y, text: y })));
-      if (years.includes(keep)) selStart.value = keep;
-    };
-    if (!histInit) {
-      histInit = true;
-      const settings = Object.keys(h.settings);
-      selSet.replaceChildren(...settings.map((x) => el("option", { value: x, text: settingLabel(x) })));
-      const want = d.recommendation && d.recommendation.setting;
-      if (want && settings.includes(want)) selSet.value = want;
-      fillStrategies();
-      selSet.addEventListener("change", () => { fillStrategies(); renderHistory(DATA); });
-      selStrat.addEventListener("change", () => renderHistory(DATA));
-      selStart.addEventListener("change", () => renderHistory(DATA));
-      $("h-tax").addEventListener("change", () => renderHistory(DATA));
-      if (h.tax_rate) $("h-tax").options[1].text = `After tax (est., ${Math.round(h.tax_rate * 100)}% rate)`;
-    }
-    const st = h.settings[selSet.value], strat = st.strategies[selStrat.value];
-    if (!strat) return;
-    const capital = Number(selSet.value.split("_core")[0]);
-    const i0 = Math.max(0, st.dates.findIndex((x) => x >= `${selStart.value}-01-01`));
-    const months = st.dates.slice(i0);
-    $("h-tax-l").hidden = !strat.returns_after_tax;
-    const taxed = $("h-tax").value === "post" && !!strat.returns_after_tax;
-    const rets = { strategy: (taxed ? strat.returns_after_tax : strat.returns).slice(i0) };
-    for (const k of ["BENCH_TR", "EW_UNIV", "AORD_PRICE"]) {
-      const key = taxed && k === "BENCH_TR" && st.baselines.BENCH_TR_AFTER_TAX ? "BENCH_TR_AFTER_TAX" : k;
-      rets[k] = (st.baselines[key] || []).slice(i0);
-    }
-    const grow = (r) => { let v = capital; return [capital, ...r.map((x) => (v *= 1 + (fin(x) ? x : 0)))]; };
-    const startDate = i0 > 0 ? st.dates[i0 - 1] : months[0];
-    const dates = [startDate, ...months];
-    const curves = Object.fromEntries(Object.entries(rets).map(([k, r]) => [k, grow(r)]));
-    const yrs = months.length / 12;
-    const cagr = (c) => Math.pow(c[c.length - 1] / capital, 1 / Math.max(yrs, 1 / 12)) - 1;
-    const mdd = (c) => { let peak = c[0], w = 0; for (const v of c) { peak = Math.max(peak, v); w = Math.min(w, v / peak - 1); } return w; };
-    const ahead = rets.strategy.filter((x, i) => fin(x) && fin(rets.BENCH_TR[i]) && x > rets.BENCH_TR[i]).length / Math.max(1, months.length);
-    const sEnd = curves.strategy.at(-1), bEnd = curves.BENCH_TR.at(-1);
-    $("h-kpis").replaceChildren(
-      tile(`A$${capital.toLocaleString("en-AU")} became`, money(sEnd), el("span", {}, [arrow(sEnd - bEnd), ` ${money(Math.abs(sEnd - bEnd))} ${sEnd >= bEnd ? "more" : "less"} than VAS (${money(bEnd)})`]), true),
-      tile("Yearly return", pct(cagr(curves.strategy), 1), el("span", { text: `VAS ${pct(cagr(curves.BENCH_TR), 1)}` })),
-      tile("Worst drop", pct(mdd(curves.strategy), 1), el("span", { text: `VAS ${pct(mdd(curves.BENCH_TR), 1)}` })),
-      tile("Months ahead of VAS", `${Math.round(ahead * 100)}%`, el("span", { text: `${months.length} months from ${fmtDate(startDate, { month: "short", year: "numeric" })}` })),
-    );
-    const series = HIST_SERIES.map((x) => ({ ...x, label: x.key === "strategy" ? strategyLabel(selStrat.value) : x.label }));
-    $("h-legend").replaceChildren(...series.map((x) => el("span", { class: "key" }, [el("i", { style: `background:${css(x.color)}` }), x.label])));
-    const kfmt = (v) => v >= 1e6 ? `$${(v / 1e6).toFixed(1)}m` : v >= 1e3 ? `$${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}k` : `$${v.toFixed(0)}`;
-    lineChart($("h-chart"), {
-      label: `Growth of A$${capital} for ${strategyLabel(selStrat.value)} vs VAS since ${startDate}`,
-      height: 320, dates, baseline: capital, endLabels: true, yWidth: 52, yfmt: kfmt,
-      series: series.map((x) => ({ label: x.label, color: css(x.color), values: curves[x.key] })),
-    });
-
-    // Year-by-year
-    const byYear = {};
-    months.forEach((m, i) => {
-      const y = m.slice(0, 4);
-      const row = byYear[y] || (byYear[y] = { n: 0, s: 1, b: 1, a: 1, last: m });
-      row.n++; row.last = m;
-      row.s *= 1 + (fin(rets.strategy[i]) ? rets.strategy[i] : 0);
-      row.b *= 1 + (fin(rets.BENCH_TR[i]) ? rets.BENCH_TR[i] : 0);
-      row.a *= 1 + (fin(rets.AORD_PRICE[i]) ? rets.AORD_PRICE[i] : 0);
-    });
-    const yRows = Object.entries(byYear).reverse().map(([y, r]) => {
-      const diff = r.s - r.b;
-      const label = r.n < 12 ? `${y} (${r.n} mo)` : y;
-      return el("tr", {}, [
-        el("td", { class: "num", text: label }), el("td", { class: "num r", text: pct(r.s - 1, 1) }),
-        el("td", { class: "num r", text: pct(r.b - 1, 1) }),
-        el("td", { class: "num r" }, [arrow(diff), ` ${diff >= 0 ? "+" : "−"}${Math.abs(diff * 100).toFixed(1)} pts`]),
-        el("td", { class: "num r", text: pct(r.a - 1, 1) }),
-      ]);
-    });
-    $("h-years").replaceChildren(el("table", {}, [
-      el("thead", {}, el("tr", {}, ["Year", "Strategy", "VAS", "Difference", "^AORD price"].map((x, i) => el("th", { class: i ? "r" : "", text: x })))),
-      el("tbody", {}, yRows),
-    ]));
-
-    // Month by month (newest first)
-    const mRows = months.map((m, i) => [m, i]).reverse().map(([m, i]) => el("tr", {}, [
-      el("td", { class: "num", text: fmtDate(m, { month: "short", year: "numeric" }) }),
-      el("td", { class: "num r", text: pct(rets.strategy[i], 1) }),
-      el("td", { class: "num r", text: pct(rets.BENCH_TR[i], 1) }),
-      el("td", { class: "mono", style: "white-space:normal;min-width:16ch", text: (strat.holdings.slice(i0)[i] || "cash").split(" ").join(", ") }),
-    ]));
-    $("h-months").replaceChildren(el("table", {}, [
-      el("thead", {}, el("tr", {}, ["Month", "Strategy", "VAS", "Held"].map((x, i) => el("th", { class: i && i < 3 ? "r" : "", text: x })))),
-      el("tbody", {}, mRows),
-    ]));
-  }
-
-  function renderSettings(d) {
-    const st = d.settings, f = st.filters;
-    const items = [
-      ["Model", `TimesFM 2.5 · ${st.context}-day context`],
-      ["Ranking", st.rank === "sharpe" ? "Forecast return ÷ forecast range" : "Forecast return"],
-      ["Positions", `${st.top} stocks, equal dollars`],
-      ["Holding period", `${st.hold} sessions`],
-      ["Capital", `$${st.capital.toLocaleString("en-AU")} (${Math.round(st.min_cash_buffer * 100)}% cash buffer)`],
-      ["Brokerage", `$${st.trade_cost} per order`],
-      ["Slippage", `${st.slippage_bps} bps each side`],
-      ["Screen", `${f.min_trading_days}+ sessions, ≥ $${f.min_price}, ≥ $${(f.min_avg_dollar_volume / 1e3).toFixed(0)}k/day`],
-      ["Benchmark", st.benchmark],
-    ];
-    $("settings").replaceChildren(...items.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]));
-  }
-
-  const CMDS = [
-    ["Install (Python 3.10+)", "pip install -r requirements.txt"],
-    ["Download prices", "python stocktrade.py ingest"],
-    ["Today's recommendation", "python stocktrade.py strat-recommend --capital 10000"],
-    ["Research grid + validation (slow)", "python stocktrade.py strat-backtest"],
-    ["Legacy TimesFM picks", "python stocktrade.py tfm-recommend --capital 5000"],
-    ["Backtest any window", "python stocktrade.py tfm-backtest --start-date 2025-01-01 --top 5 --hold 5"],
-    ["Rebuild this page locally", "python stocktrade.py tfm-publish && python stocktrade.py strat-recommend && python stocktrade.py strat-publish && python -m http.server -d docs"],
-  ];
-  function renderCmds() {
-    $("cmds").replaceChildren(...CMDS.map(([lbl, cmd], i) => {
-      const code = el("code", { id: `cmd-${i}`, text: cmd });
-      const btn = el("button", { class: "copy", type: "button", text: "Copy", "aria-label": `Copy: ${cmd}` });
-      btn.addEventListener("click", () => {
-        navigator.clipboard.writeText(cmd).then(() => { btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy", 1500); })
-          .catch(() => { const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); });
-      });
-      return el("div", { class: "cmd" }, [el("span", { class: "lbl", text: lbl }), el("div", { class: "code" }, [code, btn])]);
-    }));
-  }
-
-  $("eq-toggle").addEventListener("click", (e) => {
-    const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
-    e.currentTarget.setAttribute("aria-pressed", String(on));
-    e.currentTarget.textContent = on ? "Show as chart" : "Show as table";
-    $("eq-chart").hidden = on; $("eq-legend").hidden = on; $("eq-table").hidden = !on;
-  });
-
+  // ---------- shared lookups ----------
   let DATA = null;
-  function render(d) {
-    renderHeader(d); renderRec(d); renderCompare(d); renderHistory(d);
-    if (d.recommendations) { renderPicks(d); renderPerf(d); renderTrades(d); renderSettings(d); }
+  const scenarioKey = () => {
+    const st = readState(), sc = DATA.scenarios || {};
+    if (st.s && sc[st.s]) return st.s;
+    const pub = DATA.recommendation && DATA.recommendation.setting;
+    return pub && sc[pub] ? pub : Object.keys(sc)[0];
+  };
+  const dash = () => (DATA.dashboard && DATA.dashboard.settings) ? DATA.dashboard.settings[scenarioKey()] : null;
+  const SIGNAL_NAMES = { RAMOM: "Risk-adjusted momentum", RESMOM: "Residual momentum", COMBO: "Momentum + low-volatility blend", LOWVOL: "Low volatility", TFM_REL: "TimesFM (vs index)", TFM_RAW: "TimesFM (price)" };
+  function methodName(id) {
+    const d = dash(), m = d && d.methods && d.methods[id], p = m && m.policy;
+    if (id === "BENCH_TR") return "VAS total-return benchmark";
+    if (id === "WF_SELECT") return "Walk-forward switching account";
+    if (id === "EW_UNIV") return "Equal-weight universe (gross reference)";
+    if (id === "AORD_PRICE") return "^AORD price index (reference)";
+    if (p && p.kind === "variant") return `${SIGNAL_NAMES[p.signal] || p.signal} · ${p.n} holdings${p.regime ? " · trend filter" : ""}${p.buffer_mult === 1 ? " · no buffer" : ""}${p.rebalance === "Q" ? " · quarterly" : ""}${p.tax_aware ? " · tax-aware" : ""}${p.si_screen ? " · short-interest screen" : ""}`;
+    const o = /^OPT_([A-Z_]+?)_(nocap|cap\d+)_(var|ew|ivol)/.exec(id || "");
+    if (o) return `${SIGNAL_NAMES[o[1]] || o[1]} · optimiser (${o[2] === "nocap" ? "no preset holding count" : `at most ${o[2].slice(3)} holdings`}) · research only`;
+    const r = /^([A-Z_]+?)_N(\d+)_(reg|noreg)_B(\d+)(_SI)?(_Q)?(_TAX)?/.exec(id || "");
+    if (r) return `${SIGNAL_NAMES[r[1]] || r[1]} · ${r[2]} holdings${r[3] === "reg" ? " · trend filter" : ""}${r[4] === "1" ? " · no buffer" : ""}${r[6] ? " · quarterly" : ""}${r[7] ? " · tax-aware" : ""}`;
+    return id;
   }
-  renderCmds();
-  fetch("data/latest.json", { cache: "no-cache" })
-    .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-    .then((d) => { DATA = d; render(d); })
-    .catch(() => {
-      $("data-date").textContent = "No data yet";
-      const b = $("banner"); b.hidden = false;
-      b.textContent = "No forecast data has been published yet. The first daily run fills this page; run `python stocktrade.py tfm-publish` to build it locally.";
-      $("tickets").replaceChildren(el("div", { class: "empty-picks", text: "Picks appear here after the first daily run." }));
+  const oneLiner = (id) => { const d = dash(), m = d && d.methods && d.methods[id]; return m && m.what_it_does && m.what_it_does.text || ""; };
+  const TIER_TEXT = { LIVE: "Passed the program's research checks", PAPER: "Candidate being paper-tracked", FALLBACK: "No stock method qualified" };
+
+  // ---------- render ----------
+  function render() {
+    if (!DATA) return;
+    const st = readState();
+    for (const v of VIEWS) $(`view-${v}`).hidden = v !== st.view;
+    document.querySelectorAll("nav a").forEach((a) => a.dataset.view === st.view ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
+    renderScenario(st);
+    try {
+      if (st.view === "today") renderToday();
+      if (st.view === "performance") renderPerformance(st);
+      if (st.view === "research") renderResearch();
+      if (st.view === "how") renderHow();
+    } catch (err) {
+      console.error(err);
+      showLoad("error", "Part of this page could not be displayed. The published data may be incomplete.", true);
+    }
+  }
+  function renderCharts() { if (readState().view === "performance") renderHistory(readState()); }
+
+  function renderScenario(st) {
+    const box = $("scenario-box"), sel = $("scenario"), sc = DATA.scenarios || {};
+    const keys = Object.keys(sc);
+    box.hidden = !keys.length || st.view === "how";
+    if (!keys.length) return;
+    const cur = scenarioKey();
+    if (sel.options.length !== keys.length) {
+      sel.replaceChildren(...keys.map((k) => el("option", { value: k, text: settingLabel(k, sc[k]) + (sc[k].is_published_recommendation ? " (today's published scenario)" : "") })));
+      sel.addEventListener("change", () => { writeState({ s: sel.value, m: null }); announce(`Scenario changed to ${settingLabel(sel.value)}`); });
+    }
+    sel.value = cur;
+    const pub = DATA.recommendation && DATA.recommendation.setting;
+    $("scenario-note").textContent = `A simulated model portfolio, not a connected account. Every view uses this exact scenario; nothing is borrowed from a nearby amount.${pub && pub !== cur ? ` Today's published recommendation is for ${settingLabel(pub)}; this scenario shows its research result only.` : ""}`;
+  }
+
+  function statusCard(title, badge, cls, lines) {
+    return el("article", { class: "card" }, [el("h3", { text: title }), el("span", { class: `badge ${cls}`, text: badge }),
+      el("dl", { class: "kv" }, lines.filter(Boolean).flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]))]);
+  }
+
+  function renderToday() {
+    const key = scenarioKey(), sc = (DATA.scenarios || {})[key] || {}, rec = DATA.recommendation || {}, pub = DATA.publication || {};
+    const isPub = rec.setting === key;
+    let eyebrow = settingLabel(key, sc), head, reason, limit;
+    if (pub.state === "needs_research_refresh") {
+      head = "Research needs refreshing";
+      reason = `The published research does not match the current program version (${(pub.reasons || [])[0] || "manifest mismatch"}). This is not evidence against any method.`;
+    } else if (!sc.evaluated) {
+      head = "This scenario has not been evaluated";
+      reason = "No research result exists for this exact amount and core policy, and results from other amounts are never borrowed.";
+    } else if (sc.tier === "LIVE") {
+      head = "A stock method passed the program's research checks";
+      reason = `${methodName(sc.chosen_before_testing)} passed every check. It is a research result; this program places no trades.`;
+    } else if (sc.tier === "PAPER") {
+      head = "A candidate is being paper-tracked";
+      reason = `${methodName(sc.chosen_before_testing)} passed some checks and is followed on paper. Its history is a simulation; only observations after its freeze date are forward evidence.`;
+    } else {
+      head = "Hold the VAS benchmark: no stock method qualified";
+      const first = (sc.reasons || [])[0];
+      reason = first ? `Main reason: ${plainReason(first)}` : "The research checks were not met.";
+    }
+    limit = "Important: results are simulations on today's listed companies (survivorship bias), and July 2024 onwards has already been examined. This does not tell you to sell anything you own.";
+    $("result-eyebrow").textContent = eyebrow;
+    $("result-h").textContent = head; $("result-reason").textContent = reason; $("result-limit").textContent = limit;
+
+    const research = DATA.publication || {};
+    const fresh = isPub ? rec.data_state : null;
+    $("status-grid").replaceChildren(
+      statusCard("Research validity", pub.state === "ok" ? (TIER_TEXT[sc.tier] || "Not evaluated") : "Needs refresh", pub.state === "ok" && sc.evaluated ? (sc.tier === "LIVE" ? "ok" : "warn") : "warn", [
+        ["Research data to", research.research_data_end ? fmtDate(research.research_data_end) : "unknown"],
+        ["Research generated", research.research_generated_at ? fmtStamp(research.research_generated_at) : "unknown"],
+        ["Chosen before testing", sc.chosen_before_testing ? methodName(sc.chosen_before_testing) : "—"],
+      ]),
+      statusCard("Price freshness", !isPub ? "Shown for the published scenario" : fresh === "current" ? "Current" : "Stale", fresh === "current" ? "ok" : "warn", [
+        isPub && ["Last price session", fmtDate(rec.price_date || rec.as_of)],
+        isPub && ["Age", fin(rec.data_age_business_days) ? `${rec.data_age_business_days} business day(s)` : "unknown"],
+        isPub && rec.next_review && ["Next review", fmtDate(rec.next_review)],
+        isPub && fresh !== "current" && ["Why it matters", "No current proposals while prices are stale."],
+      ]),
+      statusCard("Execution", "Not available", "no", [
+        ["Trades", "This program places no trades."],
+        ["Why", ((rec.execution_blockers || [])[0]) || "Research quantities use adjusted prices and are not executable."],
+      ]),
+    );
+    renderAllocation(isPub ? rec.allocation : null);
+    const props = isPub ? (DATA.paper_proposals || []) : [];
+    $("proposals-box").hidden = !props.length;
+    if (props.length) $("proposals").replaceChildren(el("p", { class: "small sub", text: "Estimates for the hypothetical research book using adjusted prices. Not broker orders; this program places no trades." }),
+      table(["Side", "Share", "Shares", "Est. price", "Est. cost"], props.map((o) => [o.side, o.ticker, String(o.shares), price(o.est_price), aud(o.est_cost)]), "Paper proposals for the next open", [2, 3, 4]));
+    const why = [el("p", { text: "Qualification uses the program's nine fixed checks on the method chosen before testing. Thresholds are never loosened." })];
+    const v = (DATA.validation_summary || {})[key];
+    if (v && v.passes) why.push(checksTable(v));
+    else if ((sc.reasons || []).length) why.push(el("ul", { class: "facts" }, sc.reasons.map((r) => el("li", { text: r }))));
+    why.push(el("p", { class: "small sub", text: "The fixed A$2,000 contribution rule in the fallback text is a program assumption for the simulation, not advice for every visitor." }));
+    $("why").replaceChildren(...why);
+  }
+  const PLAIN_FAIL = { a: "it did not beat VAS in both the walk-forward and the later window", b: "its extra return did not clear the fixed 1.5-point hurdle", c: "its result could too easily be luck after many trials (deflated Sharpe below 0.95)", d: "the selection process looks overfitted (overfitting probability above 25%)", e: "its largest month-end fall was more than 5 points worse than VAS", f: "trading costs exceeded 1% a year", g: "fewer than 2 of 3 neighbouring settings also passed", h: "its extra return was not reliably positive", i: "the amount cannot fund 3 positions after fees" };
+  function plainReason(r) {
+    const m = /^\((\w)\)\s*(.*)$/.exec(r || ""); return m ? `${PLAIN_FAIL[m[1]] || m[2]} (check ${m[1]}).` : r;
+  }
+  function checksTable(v) {
+    const labels = { a: "Beat VAS in the walk-forward and later windows", b: "Excess return above a fixed 1.5-point hurdle", c: "Deflated Sharpe ratio at least 0.95", d: "Overfitting probability at most 25%", e: "Month-end largest fall within 5 points of VAS", f: "Trading costs at most 1% a year", g: "At least 2 of 3 neighbouring settings also pass", h: "Excess return positive with a cautious interval", i: "Can fund at least 3 positions after fees" };
+    return table(["Check", "Result"], Object.entries(v.passes).map(([k, ok]) => [`(${k}) ${labels[k] || k}`, el("span", { class: `badge ${ok ? "ok" : "no"}`, text: ok ? "Passed" : "Failed" })]), "Research checks for the method chosen before testing");
+  }
+  function renderAllocation(a) {
+    const box = $("alloc-box");
+    if (!a) { box.hidden = true; return; }
+    box.hidden = false;
+    if (a.status !== "ok") { $("alloc").replaceChildren(el("p", { text: a.reason || "Not available." })); return; }
+    const rows = a.holdings.map((h) => [h.ticker + (h.frozen ? " (no recent price; valued with a haircut)" : ""), String(h.shares), aud(h.value), pctPlain(h.weight)]);
+    rows.push(["Cash", "—", aud(a.cash), pctPlain(a.cash_weight)]);
+    $("alloc").replaceChildren(el("p", { class: "small sub", text: `${a.actual_count} holding(s) plus cash on ${fmtDate(a.valuation_date)}; weights of total value including cash; ${a.price_basis}.` }),
+      table(["Holding", "Shares", "Value", "Weight"], rows, "Hypothetical research book", [1, 2, 3]));
+  }
+  function table(head, rows, caption, right = []) {
+    return el("div", { class: "tbl-wrap", role: "region", "aria-label": caption, tabindex: "0" }, el("table", {}, [
+      el("caption", { text: caption }),
+      el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { scope: "col", class: right.includes(i) ? "r" : null, text: h })))),
+      el("tbody", {}, rows.map((r) => el("tr", {}, r.map((c, i) => el("td", { class: [right.includes(i) ? "r num" : "", typeof c === "string" && c.length > 30 ? "wrap-cell" : ""].join(" ").trim() || null }, c))))),
+    ]));
+  }
+
+  // ---------- Performance ----------
+  const SHOW = { hist: 10, ev: 10 };
+  function renderPerformance(st) {
+    const d = dash(), pub = DATA.publication || {};
+    $("perf-scope").textContent = `Scenario: ${settingLabel(scenarioKey(), (DATA.scenarios || {})[scenarioKey()])}. Clicking a method only inspects it; it never changes Today's result.`;
+    const tab = st.t === "ev" ? "ev" : "hist";
+    $("tab-hist").setAttribute("aria-selected", String(tab === "hist")); $("tab-ev").setAttribute("aria-selected", String(tab === "ev"));
+    $("panel-hist").hidden = tab !== "hist"; $("panel-ev").hidden = tab !== "ev";
+    if (!d) {
+      const msg = pub.rankings_state === "needs_research_refresh" ? `Rankings will appear after the next research run (${(pub.rankings_reasons || []).join("; ")}). This is not negative evidence.` : "No ranking results exist for this scenario yet (it may not have been evaluated).";
+      $("hist-body").replaceChildren(el("div", { class: "banner", text: msg })); $("ev-body").replaceChildren(el("div", { class: "banner", text: msg }));
+      $("inspector").hidden = true; $("hist-sec").hidden = !DATA.history; if (DATA.history) renderHistory(st); return;
+    }
+    $("hist-basis").value = st.b === "after_tax_estimate" ? "after_tax_estimate" : "pre_tax";
+    renderHistRanking(d, st); renderEvidence(d, st); renderInspector(d, st); renderHistory(st);
+  }
+  function inspectBtns(id, label) {
+    const go = (part) => () => { writeState({ m: id }); setTimeout(() => { const t = $(`insp-${part}`) || $("insp-h"); t && t.scrollIntoView({ block: "start" }); $("insp-h").focus(); }, 0); };
+    return el("div", { class: "row-actions" }, [
+      el("button", { class: "linkbtn", type: "button", text: "What it does", "aria-label": `What ${label} does`, onclick: go("what") }),
+      el("button", { class: "linkbtn", type: "button", text: "Why this result", "aria-label": `Why ${label} got this result`, onclick: go("why") }),
+      el("button", { class: "linkbtn", type: "button", text: "View performance", "aria-label": `View performance of ${label}`, onclick: go("hist") }),
+    ]);
+  }
+  function evStatus(id, d) {
+    const rows = d.evidence.groups.flatMap((g) => g.rows.map((r) => ({ ...r, gl: g.label })));
+    const r = rows.find((x) => x.method_id === id);
+    if (id === "BENCH_TR") return "Benchmark and fallback";
+    if (r) return `${r.gl}${r.assessment === "failed" ? " (failed checks)" : r.assessment === "not_assessed" ? " (not assessed)" : ""}`;
+    return (d.evidence.not_scored.find((x) => x.method_id === id) ? "Not scored" : "—");
+  }
+  let histSort = { key: "rank", dir: 1 };
+  function renderHistRanking(d, st) {
+    const basis = st.b === "after_tax_estimate" ? "after_tax_estimate" : "pre_tax";
+    const h = d.historical[basis], body = $("hist-body");
+    const parts = [];
+    if (basis === "after_tax_estimate") parts.push(el("p", { class: "banner info", text: "Estimated tax overlay: capital-gains estimate at the published rate. Dividend tax, franking and re-simulating cash after tax payments are not included. Methods without a computed after-tax series are listed as not ranked." }));
+    if (h.state === "unavailable") { body.replaceChildren(...parts, el("div", { class: "banner", text: h.reason })); return; }
+    const all = h.rows, q = $("hist-search").value.trim().toLowerCase();
+    parts.push(el("p", { text: `${all.length} methods ranked over ${fmtDate(h.common_interval.start)} to ${fmtDate(h.common_interval.end)} (${h.common_interval.months} months), each starting with ${aud(h.initial_nav)}.` }));
+    if (h.all_lost) parts.push(el("p", { class: "banner", text: "Every method lost money over this period; #1 is the smallest historical loss, not a profitable winner." }));
+    let view = all.filter((r) => !q || methodName(r.method_id).toLowerCase().includes(q) || r.method_id.toLowerCase().includes(q));
+    const key = histSort.key;
+    view = [...view].sort((a, b) => key === "rank" ? histSort.dir * (a.rank - b.rank || a.method_id.localeCompare(b.method_id))
+      : histSort.dir * ((fin(a[key]) ? a[key] : -Infinity) - (fin(b[key]) ? b[key] : -Infinity)) || a.rank - b.rank);
+    const showAll = SHOW.hist === Infinity || q;
+    const shown = showAll ? view : view.slice(0, SHOW.hist);
+    const sortBtn = (k, label) => {
+      const th = el("th", { scope: "col", class: k === "rank" ? null : "r", "aria-sort": histSort.key === k ? (histSort.dir > 0 ? "ascending" : "descending") : "none" });
+      th.append(el("button", { type: "button", "data-sort": k, text: label + (histSort.key === k ? (histSort.dir > 0 ? " ↑" : " ↓") : ""), onclick: () => {
+        histSort = { key: k, dir: histSort.key === k ? -histSort.dir : (k === "rank" ? 1 : -1) };
+        renderHistRanking(d, readState()); const b = $("hist-body").querySelector(`button[data-sort="${k}"]`); b && b.focus();
+        announce(`Sorted by ${label}, ${histSort.dir > 0 ? "ascending" : "descending"}. Rank numbers are unchanged.`);
+      } }));
+      return th;
+    };
+    const rowsEl = shown.map((r) => {
+      const name = methodName(r.method_id), inspected = readState().m === r.method_id;
+      return el("tr", { class: inspected ? "inspected" : null, "data-method": r.method_id }, [
+        el("td", { class: "num", text: `#${r.rank}` }),
+        el("td", { class: "wrap-cell" }, [el("div", { class: "rank-name", text: name }), el("div", { class: "small sub", text: oneLiner(r.method_id) })]),
+        el("td", { class: "num r", "data-label": "Net profit", text: aud(r.net_profit) }),
+        el("td", { class: "num r", "data-label": "Largest fall (daily)", text: pct(r.mdd_daily) }),
+        el("td", { class: "wrap-cell", "data-label": "Evidence status", text: evStatus(r.method_id, d) }),
+        el("td", { class: "wrap-cell" }, [inspectBtns(r.method_id, name),
+          el("details", {}, [el("summary", { text: "More metrics" }), el("dl", { class: "kv small" }, [
+            ["Final value", aud(r.final_value)], ["Total return", pct(r.total_return)], ["Annualised return", pct(r.cagr)],
+            ["Annualised vs VAS (same dates)", pp(r.delta_cagr_vs_vas)], ["Largest fall, month-end", pct(r.mdd_month_end)],
+            ["Recorded trading costs", aud(r.costs_aud)], ["Average monthly excess vs VAS (annualised, arithmetic)", pct(r.excess_vs_bench_arith)],
+          ].flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "num", text: v })]))])]),
+      ]);
     });
-  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => DATA && render(DATA), 150); });
+    parts.push(el("div", { class: "tbl-wrap stack", role: "region", "aria-label": "Past profitability ranking", tabindex: "0" }, el("table", {}, [
+      el("caption", { text: `Ranked by net profit (A$, ${basis === "pre_tax" ? "before tax, after trading costs" : "estimated tax overlay"}). Sorting other columns does not change rank numbers.` }),
+      el("thead", {}, el("tr", {}, [sortBtn("rank", "Rank"), el("th", { scope: "col", text: "Method" }), sortBtn("net_profit", "Net profit"), sortBtn("mdd_daily", "Largest fall (daily)"), el("th", { scope: "col", text: "Evidence status" }), el("th", { scope: "col", text: "Details" })])),
+      el("tbody", {}, rowsEl),
+    ])));
+    parts.push(el("p", { class: "small sub", text: q ? `Showing ${view.length} of ${all.length} ranked methods matching "${q}". Ranks are from the full ranking.` : `Showing ${shown.length} of ${all.length} ranked methods.` }));
+    if (!showAll && view.length > SHOW.hist) parts.push(el("button", { class: "btn", type: "button", text: `Show all ${view.length}`, onclick: () => { SHOW.hist = Infinity; renderHistRanking(d, readState()); } }));
+    const side = (title, list, fmt) => list.length ? el("details", { class: "card" }, [el("summary", { text: `${title} (${list.length})` }), el("ul", { class: "facts" }, list.map(fmt))]) : null;
+    parts.push(side("Shorter history (shown separately, not ranked against the full period)", h.short_coverage, (r) => el("li", { text: `${methodName(r.method_id)}: ${r.reason}${r.own_interval ? `; total ${pct(r.own_interval.total_return)} vs VAS ${pct(r.own_interval.vas_total_return)} over the same ${r.own_interval.months} months` : ""}.` })));
+    parts.push(side("Not ranked", h.not_ranked, (r) => el("li", { text: `${methodName(r.method_id)}: ${r.reason || r.status}` })));
+    parts.push(side("Different scenario basis (excluded)", h.incompatible, (r) => el("li", { text: `${methodName(r.method_id)}: ${r.reason}` })));
+    parts.push(side("References, not investable accounts", d.references || [], (r) => el("li", { text: `${r.label}: ${r.basis}${fin(r.total_return) ? `; total ${pct(r.total_return)} over its own dates` : ""}.` })));
+    body.replaceChildren(...parts.filter(Boolean));
+  }
+  function renderEvidence(d, st) {
+    const e = d.evidence, parts = [];
+    if (e.no_stock_method_qualifies) parts.push(el("div", { class: "banner", text: "No stock method qualifies; the program retains its benchmark fallback (VAS). The exploratory order below is for learning only and promotes nothing." }));
+    for (const g of e.groups) {
+      const rows = g.rows;
+      parts.push(el("h3", { text: `${g.label} (${rows.length})` }));
+      if (!rows.length) { parts.push(el("p", { class: "sub", text: "None." })); continue; }
+      if (g.leader_changes) parts.push(el("p", { class: "small sub", text: "The leader in this group changes under the alternative weightings, so treat its order with caution." }));
+      const list = (SHOW.ev === Infinity ? rows : rows.slice(0, SHOW.ev)).map((r) => {
+        const name = methodName(r.method_id);
+        return el("li", { class: `rank-item${readState().m === r.method_id ? " inspected" : ""}` }, [
+          el("div", { class: "rank-top" }, [el("span", { class: "rank-no", text: `#${r.group_rank}` }), el("div", {}, [el("div", { class: "rank-name", text: name }), el("div", { class: "small sub", text: oneLiner(r.method_id) })])]),
+          el("div", { class: "rank-metrics" }, [
+            el("div", {}, [el("span", { text: "Evidence score" }), el("span", { class: "num", text: `${r.score.toFixed(1)} / 100${r.near_tie ? " (near tie)" : ""}` })]),
+            el("div", {}, [el("span", { text: "Status" }), el("span", { text: r.assessment === "failed" ? "Assessed: failed checks" : r.assessment === "not_assessed" ? "Not assessed by the engine" : g.label })]),
+            el("div", {}, [el("span", { text: "Rank under other weightings" }), el("span", { class: "num", text: `${r.sensitivity_rank_range[0]}–${r.sensitivity_rank_range[1]}` })]),
+          ]),
+          el("details", {}, [el("summary", { text: "Score parts" }), table(["Part", "Score", "Weight", "Points"], [["Net return vs VAS", "R"], ["Downside vs VAS (daily)", "D"], ["Robustness (DSR + neighbours)", "B"], ["Year-by-year consistency", "T"], ["Trading-cost resilience", "C"]].map(([lbl, k], i) => [lbl, r.components[k].toFixed(1), `${Math.round(e.score_manifest.weights.default[i] * 100)}%`, r.contributions[k].toFixed(1)]), "Evidence score parts", [1, 2, 3])]),
+          inspectBtns(r.method_id, name),
+        ]);
+      });
+      parts.push(el("ol", { class: "rank-list", "aria-label": `${g.label} ranking` }, list));
+    }
+    const total = e.groups.reduce((a, g) => a + g.rows.length, 0);
+    if (SHOW.ev !== Infinity && e.groups.some((g) => g.rows.length > SHOW.ev)) parts.push(el("button", { class: "btn", type: "button", text: `Show all ${total} scored methods`, onclick: () => { SHOW.ev = Infinity; renderEvidence(d, readState()); } }));
+    if (e.not_scored.length) parts.push(el("details", { class: "card" }, [el("summary", { text: `Not scored (${e.not_scored.length})` }), el("ul", { class: "facts" }, e.not_scored.map((r) => el("li", { text: `${methodName(r.method_id)}: ${r.reason}${r.missing && r.missing.length ? ` — ${r.missing.join("; ")}` : ""}` })))]));
+    const m = e.score_manifest, pbo = e.shared_pbo || {};
+    parts.push(el("details", { class: "card" }, [el("summary", { text: "How the evidence score works" }), el("p", { text: m.label }), el("ul", { class: "facts" }, [
+      `Version ${m.version}; weights R ${m.weights.default.join(" / ")} (return, downside, robustness, consistency, cost). Alternative weightings: ${Object.keys(m.weights).filter((k) => k !== "default").join(", ")}.`,
+      `Windows: W = walk-forward window, L = later window (${(DATA.dashboard.evidence.windows.L || {}).start} onwards). Both are historical diagnostics, not untouched tests.`,
+      `Coverage: W at least ${m.coverage_rules.W_min_months} months, L at least ${m.coverage_rules.L_min_months}, at least ${m.coverage_rules.min_common_years} complete common years. Missing inputs give no score; weights are never re-spread.`,
+      `Shared overfitting probability (PBO) for this scenario's selection procedure: ${fin(pbo.pbo) ? pctPlain(pbo.pbo, 0) : "n/a"} (${pbo.scope}). It is not each method's chance of losing.`,
+      "VAS is the reference and current fallback; it is not given a fabricated score.",
+    ].map((t) => el("li", { text: t })))]));
+    $("ev-body").replaceChildren(...parts);
+  }
+  function renderInspector(d, st) {
+    const id = st.m || d.frozen || "BENCH_TR", m = d.methods[id] || null;
+    const box = $("inspector"); box.hidden = false;
+    $("insp-h").textContent = methodName(id);
+    const todayMethod = ((DATA.scenarios || {})[scenarioKey()] || {}).chosen_before_testing;
+    $("insp-flag").hidden = !(st.m && st.m !== todayMethod);
+    if (!m) { $("insp-body").replaceChildren(el("p", { text: "No details are available for this method in this scenario." })); return; }
+    const w = m.what_it_does || {};
+    const facts = (x) => x && x.available ? el("ul", { class: "facts" }, x.facts.map((f) => el("li", {}, [f.text, " ", el("span", { class: "src", text: `[${f.metric}${f.window ? `, ${f.window}` : ""}]` })]))) : el("p", { class: "sub", text: (x && (x.reason || "Not available.")) + (x && x.missing && x.missing.length ? ` Missing: ${x.missing.join("; ")}.` : "") });
+    const q = m.qualification || {};
+    $("insp-body").replaceChildren(
+      el("h4", { id: "insp-what", text: "What it does" }), el("p", { text: w.text || "No registered description for this method." }),
+      w.chips && w.chips.length ? el("ul", { class: "chips", "aria-label": "Method settings" }, w.chips.map((c) => el("li", { text: c }))) : null,
+      id === d.frozen ? el("p", { class: "badge", text: `Chosen before testing · current assessment: ${TIER_TEXT[d.tier] || d.tier}` }) : null,
+      q.assessment === "not_assessed" ? el("p", { class: "small sub", text: "Not assessed: the engine only assesses the method chosen before testing. Ranking diagnostics here do not assign LIVE or PAPER." }) : null,
+      el("h4", { id: "insp-why", text: "Why this historical result" }), facts(m.why_historical),
+      el("h4", { text: "Why this evidence rank" }), facts(m.why_rank),
+    );
+  }
+  function renderHistory(st) {
+    const h = DATA.history, key = scenarioKey();
+    const sec = $("hist-sec");
+    const stt = h && h.settings && h.settings[key];
+    const d = dash();
+    const id = st.m || (d && d.frozen) || ((DATA.scenarios || {})[key] || {}).chosen_before_testing || null;
+    const strat = stt && id && stt.strategies[id];
+    sec.hidden = !stt;
+    if (!stt) return;
+    const selStart = $("h-start");
+    const years = [...new Set(stt.dates.map((x) => x.slice(0, 4)))];
+    if (selStart.options.length !== years.length) { const keep = selStart.value; selStart.replaceChildren(...years.map((y) => el("option", { value: y, text: y }))); if (years.includes(keep)) selStart.value = keep; }
+    const capital = Number(key.split("_core")[0]);
+    const i0 = Math.max(0, stt.dates.findIndex((x) => x >= `${selStart.value}-01-01`));
+    const months = stt.dates.slice(i0);
+    const taxed = $("h-tax").value === "post";
+    $("h-tax-l").hidden = !(strat && strat.returns_after_tax);
+    const bKey = taxed && stt.baselines.BENCH_TR_AFTER_TAX ? "BENCH_TR_AFTER_TAX" : "BENCH_TR";
+    const grow = (r) => { if (!r) return null; let v = capital, ok = true; return [capital, ...r.slice(i0).map((x) => { if (!ok || !fin(x)) { ok = false; return null; } return (v *= 1 + x); })]; };
+    const startDate = i0 > 0 ? stt.dates[i0 - 1] : months[0];
+    const dates = [startDate, ...months];
+    const series = [];
+    const stratLabel = strat ? methodName(id) : null;
+    if (strat) series.push({ label: stratLabel, color: css("--s1"), width: 2.5, values: grow(taxed && strat.returns_after_tax ? strat.returns_after_tax : strat.returns) });
+    series.push({ label: taxed ? "VAS (estimated tax)" : "VAS total-return benchmark", color: css("--s2"), dash: "6 4", values: grow(stt.baselines[bKey]) });
+    if ($("x-ew").checked) series.push({ label: "Equal-weight universe (gross)", color: css("--s3"), dash: "2 3", values: grow(stt.baselines.EW_UNIV) });
+    if ($("x-aord").checked) series.push({ label: "^AORD price only", color: css("--s4"), dash: "10 3 2 3", values: grow(stt.baselines.AORD_PRICE) });
+    $("hist-h").textContent = strat ? `History: ${stratLabel}` : "History: VAS (no history for the inspected method)";
+    $("h-legend").replaceChildren(...series.map((x) => el("span", { class: "key" }, [svgKey(x), x.label])));
+    const kfmt = (v) => v >= 1e6 ? `$${(v / 1e6).toFixed(1)}m` : v >= 1e3 ? `$${(v / 1e3).toFixed(v >= 1e5 ? 0 : 1)}k` : `$${v.toFixed(0)}`;
+    lineChart($("h-chart"), { label: `Growth of ${aud(capital)} from ${fmtDate(startDate)}`, height: 300, dates, baseline: capital, yfmt: kfmt, series });
+    const end = (v) => v && fin(v[v.length - 1]) ? v[v.length - 1] : null;
+    $("h-summary").textContent = series.map((x) => `${x.label}: ${end(x.values) != null ? aud(end(x.values)) : "incomplete (missing month)"}`).join("; ") + ` (from ${aud(capital)} on ${fmtDate(startDate)} to ${fmtDate(dates[dates.length - 1])}).`;
+    $("h-table").replaceChildren(el("table", {}, [el("caption", { text: "Account value by month" }),
+      el("thead", {}, el("tr", {}, [el("th", { scope: "col", text: "Month end" }), ...series.map((x) => el("th", { scope: "col", class: "r", text: x.label }))])),
+      el("tbody", {}, dates.map((dt, i) => el("tr", {}, [el("td", { class: "num", text: dt }), ...series.map((x) => el("td", { class: "num r", text: fin(x.values[i]) ? aud(x.values[i]) : "missing" }))])))]));
+    const yr = {};
+    const sr = strat ? (taxed && strat.returns_after_tax ? strat.returns_after_tax : strat.returns).slice(i0) : [];
+    const br = (stt.baselines[bKey] || []).slice(i0);
+    months.forEach((mo, i) => { const y = mo.slice(0, 4); const r = yr[y] || (yr[y] = { n: 0, s: 1, b: 1, sm: 0, bm: 0 }); r.n++; if (fin(sr[i])) { r.s *= 1 + sr[i]; r.sm++; } if (fin(br[i])) { r.b *= 1 + br[i]; r.bm++; } });
+    $("h-years").replaceChildren(el("table", {}, [el("caption", { text: "Year by year (same-year compounded, net of costs)" }),
+      el("thead", {}, el("tr", {}, ["Year", strat ? "Method" : "—", "VAS", "Difference"].map((x, i) => el("th", { scope: "col", class: i ? "r" : null, text: x })))),
+      el("tbody", {}, Object.entries(yr).reverse().map(([y, r]) => {
+        const sOk = strat && r.sm === r.n, bOk = r.bm === r.n;
+        return el("tr", {}, [el("td", { class: "num", text: r.n < 12 ? `${y} (${r.n} months, partial)` : y }),
+          el("td", { class: "num r", text: sOk ? pct(r.s - 1) : strat ? "incomplete" : "—" }), el("td", { class: "num r", text: bOk ? pct(r.b - 1) : "incomplete" }),
+          el("td", { class: "num r", text: sOk && bOk ? pp(r.s - r.b) : "—" })]);
+      }))]));
+  }
+  function svgKey(x) { const k = s("svg", { width: 26, height: 10, "aria-hidden": "true" }); k.append(s("line", { x1: 1, x2: 25, y1: 5, y2: 5, stroke: x.color, "stroke-width": 2.5, "stroke-dasharray": x.dash || "none" })); return k; }
+
+  // ---------- Research ----------
+  function renderResearch() {
+    const key = scenarioKey(), v = (DATA.validation_summary || {})[key], sc = (DATA.scenarios || {})[key] || {};
+    const box = [];
+    box.push(el("h3", { text: `Checks for ${settingLabel(key, sc)}` }));
+    if (v && v.passes) {
+      const dsr = v.dsr_frozen || {}, pbo = v.pbo || {}, nb = v.neighbours || [];
+      box.push(checksTable(v));
+      box.push(el("dl", { class: "kv" }, [
+        ["Chosen before testing", `${methodName(v.frozen && v.frozen.variant)} (${v.frozen && v.frozen.variant}); selected on data before ${(v.frozen && v.frozen.selected_using_data_before) || "Jul 2024"}`],
+        ["Deflated Sharpe (DSR)", fin(dsr.dsr) ? `${dsr.dsr.toFixed(2)} (needs ≥ 0.95; ${dsr.trials} trials). Not a chance of making money.` : "n/a"],
+        ["Overfitting probability (PBO)", fin(pbo.pbo) ? `${pctPlain(pbo.pbo, 0)} (needs ≤ 25%; procedure-level)` : "n/a"],
+        ["Neighbours passing (a)", `${nb.filter((n) => n.passes_a_full || n.passes_a_wf).length} of ${nb.length} (needs 2): ${nb.map((n) => n.variant).join(", ")}`],
+        ["Walk-forward picks", (v.walk_forward_picks || []).map((p) => `${p.year}: ${p.variant}`).join(", ") || "—"],
+        ["Capacity", v.capacity ? `${v.capacity.funded_n_eff} fee-aware positions fundable (nominal ${v.capacity.nominal_n})` : "—"],
+        ["Evidence note", v.hold_out_note || "—"],
+      ].flatMap(([k, x]) => [el("dt", { text: k }), el("dd", { text: x })])));
+    } else box.push(el("p", { text: (sc.reasons || []).join("; ") || "No research result for this exact scenario." }));
+    const pub = DATA.publication || {};
+    box.push(el("details", { class: "card" }, [el("summary", { text: "Publication manifest" }), el("dl", { class: "kv small" }, [
+      ["State", pub.state], ["Engine", pub.engine_id], ["Config", pub.config_id], ["Calendar", pub.calendar_id], ["Research id", pub.research_id || "—"],
+      ["Data id", pub.data_id || "—"], ["Published", fmtStamp(pub.published_at)], ["Display schema", DATA.display_schema], ["Notes", (pub.reasons || []).join("; ") || "—"],
+    ].flatMap(([k, x]) => [el("dt", { text: k }), el("dd", { class: "mono", text: String(x == null ? "—" : x) })]))]));
+    $("res-checks").replaceChildren(...box);
+    renderCompare();
+    const extra = [];
+    const ic = DATA.signal_ic || {};
+    if (Object.keys(ic).length) extra.push(el("section", { class: "sec" }, [el("h3", { text: "Does each signal rank next month's returns?" }),
+      el("p", { class: "small sub", text: "Rank IC: correlation between a month's score and the next month's traded return (next open to close 21 sessions later). |t| above 2 suggests a real effect." }),
+      table(["Signal", "Mean IC", "t-stat", "Months positive"], Object.entries(ic).map(([k, x]) => [k, fin(x.mean_ic) ? x.mean_ic.toFixed(3) : "n/a", fin(x.nw_t) ? x.nw_t.toFixed(2) : "n/a", fin(x.pct_positive) ? pctPlain(x.pct_positive, 0) : "n/a"]), "Signal rank IC", [1, 2, 3])]));
+    extra.push(el("section", { class: "sec" }, [el("h3", { text: "Research optimiser (no preset holding count)" }),
+      el("p", { text: "A variable-weight optimiser exists for research only. The owner's account policy is unset, so it cannot be promoted and is not used for recommendations. Its matched study is pending: no compatible study has been published." })]));
+    $("res-extra").replaceChildren(...extra);
+    renderLegacy();
+  }
+  const CMP_COLS = [["cagr", "Annualised return", (v) => pct(v)], ["sharpe", "Sharpe (zero-rate)", (v) => fin(v) ? v.toFixed(2) : "n/a"], ["mdd", "Largest fall (month-end)", (v) => pct(v)], ["mdd_daily", "Largest fall (daily)", (v) => pct(v)], ["cagr_after_tax", "Annualised, est. tax", (v) => pct(v)], ["excess_vs_bench", "Mean excess vs VAS (arith.)", (v) => pct(v)], ["turnover", "Turnover", (v) => fin(v) ? `${v.toFixed(1)}×` : "—"], ["cost_drag", "Cost drag", (v) => fin(v) ? pctPlain(v, 2) : "—"]];
+  let cmpSort = { key: "cagr", dir: -1 };
+  function renderCompare() {
+    const rows = DATA.strategy_comparison || [], key = scenarioKey(), sel = $("cmp-period");
+    const periods = [...new Set(rows.map((r) => r.period))];
+    const LABEL = { full: "Full period", walk_forward: "Walk-forward window (W)", hold_out: "Later window (L, already examined)", design: "Design window" };
+    if (sel.options.length !== periods.length) { sel.replaceChildren(...periods.map((p) => el("option", { value: p, text: LABEL[p] || p }))); sel.value = periods.includes("full") ? "full" : periods[0]; sel.onchange = renderCompare; }
+    const view = rows.filter((r) => r.setting === key && r.period === sel.value && fin(r.cagr));
+    view.sort((a, b) => cmpSort.dir * ((fin(a[cmpSort.key]) ? a[cmpSort.key] : -Infinity) - (fin(b[cmpSort.key]) ? b[cmpSort.key] : -Infinity)) || String(a.id).localeCompare(String(b.id)));
+    const head = el("tr", {}, [el("th", { scope: "col", text: "Method" }), ...CMP_COLS.map(([k, label]) => {
+      const th = el("th", { scope: "col", class: "r", "aria-sort": cmpSort.key === k ? (cmpSort.dir > 0 ? "ascending" : "descending") : "none" });
+      th.append(el("button", { type: "button", "data-sort": k, text: label + (cmpSort.key === k ? (cmpSort.dir > 0 ? " ↑" : " ↓") : ""), onclick: () => {
+        cmpSort = { key: k, dir: cmpSort.key === k ? -cmpSort.dir : -1 }; renderCompare(); const b = $("cmp-table").querySelector(`button[data-sort="${k}"]`); b && b.focus(); announce(`Sorted by ${label}`); } }));
+      return th; })]);
+    $("cmp-table").replaceChildren(el("div", { class: "tbl-wrap", role: "region", "aria-label": "All metrics", tabindex: "0" }, el("table", {}, [
+      el("caption", { text: `${view.length} rows for ${settingLabel(key)}. References (equal-weight gross, ^AORD price-only) are labelled.` }),
+      el("thead", {}, head), el("tbody", {}, view.map((r) => el("tr", {}, [el("td", { class: "wrap-cell", text: `${methodName(r.id)}${r.is_frozen ? " — chosen before testing" : ""}` }), ...CMP_COLS.map(([k, , f]) => el("td", { class: "num r", text: f(r[k]) }))]))),
+    ])));
+  }
+  function renderLegacy() {
+    const d = DATA, body = $("legacy-body");
+    if (!d.recommendations || !d.backtest) { body.replaceChildren(el("p", { class: "sub", text: "No legacy data published." })); return; }
+    const st = d.settings, t = d.backtest.timesfm, strat = t.strategy, bench = t.benchmark;
+    body.replaceChildren(
+      el("p", { text: `${fmtDate(d.backtest.start)} to ${fmtDate(d.backtest.end)} · top ${st.top}, ${st.hold}-session holds · A$${st.trade_cost} per order + ${st.slippage_bps / 100}% slippage each side. Prices to ${fmtDate(d.data_date)}.` }),
+      el("dl", { class: "kv" }, [["Legacy strategy return", pct(strat.total_return)], [`Index (${st.benchmark}, price only)`, bench ? pct(bench.total_return) : "n/a"], ["Trades", String(t.trades_count)]].flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "num", text: v })])),
+      table(["Share", "Median forecast", "10–90% model range", "Qty"], d.recommendations.map((p) => [p.symbol, pct(p.expected), `${pct(p.q10, 0)} to ${pct(p.q90, 0)}`, String(p.qty)]), "Latest legacy picks (model quantiles, not accuracy claims)", [1, 2, 3]),
+      d.backtest.recent_trades && d.backtest.recent_trades.length ? table(["Signal", "Exit", "Share", "Return", "P&L"], d.backtest.recent_trades.map((x) => [x.signal_date, x.exit_date, x.symbol, pct(x.return), aud(x.pnl)]), "Legacy recent backtest trades", [3, 4]) : null,
+    );
+  }
+
+  // ---------- How it works ----------
+  function renderHow() {
+    const n = new Set((DATA.strategy_comparison || []).filter((r) => r.period === "full" && !["BENCH_TR", "AORD_PRICE", "EW_UNIV", "WF_SELECT"].includes(r.id)).map((r) => r.id)).size;
+    const settings = Object.keys(DATA.scenarios || {}).length;
+    $("steps").replaceChildren(...[
+      ["Screen the market", "Each month-end, keep the most-traded ASX shares with a clean price history and enough turnover. ETFs are excluded."],
+      [`Test ${n || "the registered"} methods`, `Each method is simulated across ${settings || "several"} account sizes, after modelled broker fees and slippage, with whole shares only.`],
+      ["Choose before testing", "One method per account size is chosen using data before July 2024, then checked on later data. That later period has since been examined, so it counts as historical evidence."],
+      ["Apply nine fixed checks", "Beat VAS, survive overfitting tests, keep costs low and fund at least three positions. If anything fails, the program keeps the VAS benchmark."],
+    ].map(([h, p]) => el("li", {}, [el("h3", { text: h }), el("p", { class: "sub", text: p })])));
+    $("glossary").replaceChildren(...[
+      ["Annualised return (CAGR)", "The steady yearly growth rate that gives the same end result."],
+      ["Largest fall from peak (drawdown)", "The biggest drop from a previous high, measured daily or at month-ends."],
+      ["Core ETF share", "The part of the model portfolio reserved for the VAS ETF."],
+      ["Estimated tax overlay", "A rough capital-gains tax estimate; dividend tax and franking ignored."],
+      ["Chosen before testing", "The method picked on earlier data for a scenario, then assessed by the nine checks."],
+      ["Evidence score /100", "A declared display heuristic combining return, downside, robustness, consistency and cost. Not a chance of profit."],
+    ].flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]));
+    const CMDS = [["Install (Python 3.10+)", "pip install -r requirements.txt"], ["Download prices", "python stocktrade.py ingest"], ["Research grid, checks and rankings (slow)", "python stocktrade.py strat-backtest"], ["Recommendation for your configured amount", "python stocktrade.py strat-recommend --capital 10000"], ["Publish to this page", "python stocktrade.py strat-publish && python -m http.server -d docs"], ["Explain the configuration", "python stocktrade.py strat-explain-config"]];
+    $("cmds").replaceChildren(...CMDS.map(([lbl, cmd]) => el("div", { class: "sec" }, [el("span", { class: "small sub", text: lbl }), el("div", { class: "code" }, [el("code", { text: cmd }),
+      el("button", { class: "btn small", type: "button", text: "Copy", "aria-label": `Copy command: ${cmd}`, onclick: (e) => { const b = e.currentTarget; navigator.clipboard && navigator.clipboard.writeText(cmd).then(() => { b.textContent = "Copied"; announce("Command copied"); setTimeout(() => { b.textContent = "Copy"; }, 1500); }).catch(() => {}); } })])])));
+  }
+
+  // ---------- load + states ----------
+  function showLoad(kind, text, retry) {
+    const b = $("load-state"); b.hidden = false; b.replaceChildren(el("p", { text }));
+    if (retry) b.append(el("button", { class: "btn small", type: "button", text: "Try again", onclick: load }));
+    b.dataset.state = kind;
+  }
+  function publicationBanner() {
+    const pub = DATA.publication || {}, b = $("pub-banner");
+    const msgs = [];
+    if (DATA.demo) msgs.push("Synthetic demo data: excluded from real rankings and actions.");
+    if (pub.state === "needs_research_refresh") msgs.push(`Research needs refreshing: ${(pub.reasons || []).join("; ")}. This is not negative evidence about any method.`);
+    else if (pub.rankings_state === "needs_research_refresh") msgs.push(`Method rankings are waiting for the next research run (${(pub.rankings_reasons || []).join("; ")}). Today's research result is current.`);
+    b.hidden = !msgs.length; b.replaceChildren(...msgs.map((t) => el("p", { text: t })));
+    $("foot-gen").textContent = `Published ${fmtStamp(pub.published_at || DATA.strategy_published_at || DATA.generated_at)}. Research generated ${fmtStamp(pub.research_generated_at)}.`;
+  }
+  function load() {
+    showLoad("loading", "Loading published results…");
+    fetch("data/latest.json", { cache: "no-cache" })
+      .then((r) => { if (r.status === 404) throw Object.assign(new Error("missing"), { kind: "missing" }); if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { kind: "network" }); return r.json().catch(() => { throw Object.assign(new Error("bad json"), { kind: "schema" }); }); })
+      .then((d) => {
+        if (!d.display_schema || !SUPPORTED_DISPLAY.includes(d.display_schema)) {
+          DATA = null;
+          showLoad("schema", d.display_schema ? `The published data uses a newer or unknown format (${d.display_schema}). Reload the page to get the matching version.` : "The published data predates this page version and is missing the research publication details. It will update after the next daily run.", true);
+          return;
+        }
+        DATA = d; $("load-state").hidden = true; publicationBanner(); render();
+      })
+      .catch((err) => {
+        DATA = null;
+        if (err.kind === "missing") showLoad("missing", "No results have been published yet. They appear after the first daily run.", true);
+        else if (err.kind === "schema") showLoad("schema", "The published data could not be read (it may be incomplete).", true);
+        else showLoad("network", "Could not reach the published data. Check your connection and try again.", true);
+      });
+  }
+  addEventListener("hashchange", render);
+  addEventListener("popstate", render);
+  $("tab-hist").addEventListener("click", () => writeState({ t: "hist" }));
+  $("tab-ev").addEventListener("click", () => writeState({ t: "ev" }));
+  $("hist-basis").addEventListener("change", (e) => { writeState({ b: e.target.value }); announce(`Basis: ${e.target.selectedOptions[0].text}`); });
+  $("hist-search").addEventListener("input", () => { const d = dash(); d && renderHistRanking(d, readState()); });
+  for (const id of ["h-start", "h-tax", "x-ew", "x-aord"]) $(id).addEventListener("change", () => renderHistory(readState()));
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderCharts, 150); });
+  if (!location.hash) history.replaceState(null, "", "#/today");
+  load();
 })();
 </script>
 </body>

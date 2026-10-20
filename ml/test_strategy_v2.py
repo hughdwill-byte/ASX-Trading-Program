@@ -297,12 +297,13 @@ def test_publish_and_page():
         (tmp / "validation.json").write_text(json.dumps({"settings": {}, "ic": {}}))
         sc.strat_publish(dict(DEFAULTS), results_dir=tmp, out=out)
         d = json.loads(out.read_text())
-        for key in ("recommendation", "strategy_comparison", "orders_next_open", "benchmark_note", "data_flags"):
+        for key in ("recommendation", "strategy_comparison", "orders_next_open", "benchmark_note", "data_flags",
+                    "display_schema", "publication", "scenarios"):
             assert key in d, key
         assert d["generated_at"] == "x" and d["recommendations"] == []
+    # the page and the publisher must agree on the display contract version (browser checks: tools/ui_check.mjs)
     html = pathlib.Path(__file__).resolve().parents[1].joinpath("docs", "index.html").read_text()
-    assert 'id="compare-sec"' in html and 'id="rec"' in html
-    assert "d.strategy_comparison || []" in html and "const r = d.recommendation;" in html
+    assert f'"{d["display_schema"]}"' in html
 
 
 def test_after_tax_and_fund_filter():

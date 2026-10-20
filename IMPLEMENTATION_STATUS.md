@@ -1,4 +1,31 @@
-# Implementation status (ASX_IMPLEMENT.md)
+# Implementation status (ASX_IMPLEMENT.md, then ASX_UX_IMPLEMENT.md)
+
+## UX / rankings (ASX_UX_IMPLEMENT.md, 2026-10-20) — on top of main 475221c
+
+Display/publication contract `asx_research_display_v1`; ranking artifact `dashboard_v1`; score `evidence_score_v1`.
+No trading rule, threshold, frozen experiment, objective or tier changed (`ENGINE_ID` unchanged).
+
+| Area | Status | Where |
+|---|---|---|
+| Ranking/explanation module | done | `ml/dashboard_rankings.py` (pure): past-profit ranking (integer cents, competition ranks, loss-only wording, cohort/coverage checks, references excluded, after-tax basis only from computed series), evidence score v1 (exact formula/weights/anchors, null on missing, no renormalisation, near ties, group-local ranks, fixed-group sensitivity), method registry from structured policy, deterministic cited explanation facts |
+| Research producer | done | `strategy_cli.dashboard_setting` -> `results/dashboard.json` during `strat-backtest` from in-memory results. Per-method DSR (same trial context as the engine, shared per setting), each method's own registered neighbours (factored `registered_neighbours`/`evaluate_neighbours`, unchanged semantics, extra runs registered as trials), daily drawdowns, W/L windows from `validation.PERIODS`; shared PBO labelled procedure-level; WF_SELECT as separate short-coverage account |
+| Publisher | done | `strat_publish`: `display_schema`, `publication` manifest (`state` for research validity, `rankings_state` for the artifact; mixed engine/config or unknown schema -> needs refresh, rankings withheld), per-setting `scenarios` (exact match, no inheritance), richer `validation_summary`, recommendation freshness fields from the producer (`price_date`, `data_age_business_days`, `next_review`), actual research-book `allocation` (weights incl. cash; `strategy_cli.paper_allocation`) |
+| Dashboard UI | done | `docs/index.html` rewritten: ASX Research; Today / Performance / Research / How it works with hash URLs (`#/performance?s=&m=&b=&t=`), Back/Forward/reload; global Research scenario; Today result + reason + limitation + 3 status cards + "This program places no trades."; Past profitability (top 10 + Show all, search without re-ranking, sortable header buttons with aria-sort, focus kept, live announcements) and Evidence for future use (groups, fallback notice, score parts); method inspector (What it does / Why this historical result / Why this evidence rank, "Inspecting another method"); history chart follows inspected method (method + VAS default, optional references, dash patterns, year ticks, data table, keyboard slider, gaps never zero-filled); Research diagnostics + legacy archive; plain-language glossary; distinct load/missing/schema/network/render states; contrast-safe tokens both themes |
+| Workflows | done | research commits `results/dashboard.json`; `test_dashboard.py` in both self-checks |
+
+Checks (all pass): the seven earlier test files, `python3 ml/test_dashboard.py` (11 tests, ~15 s), pyflakes clean on
+`ml/*.py stocktrade.py tools/*.py`, and browser checks `python3 tools/build_ui_fixture.py <dir> && node tools/ui_check.mjs
+<dir>/site` (42/42 in headless Chromium: Today content, nav/Back/reload, inspection leaves Today unchanged, keyboard sort
+focus/aria-sort/announcement, rank numbers stable, evidence groups/fallback, contrast >= 4.5:1 for all text in both themes
+on all views, no page-level horizontal scroll at 320 CSS px (=400% zoom) and with 200% text, 44 px targets, landmarks,
+chart table alternative, missing/schema/network states). Needs a dev-only `playwright` install; skips otherwise.
+
+Pending / not verified: screen-reader and real-device testing; human usability validation; Windows high-contrast.
+Change summary vs a previous snapshot is not shown (no compatible previous snapshot is stored). The real ranking artifact
+does not exist until the next research run: until then the live page shows "Method rankings are waiting for the next
+research run" (real-results smoke check done locally into the scratchpad, not committed). OptPolicy matched study is
+still unpublished, so the optimiser is shown as research-only with "study pending". Broker/tax controls only select
+computed results (one broker modelled; tax overlay uses the computed after-tax series).
 
 Spec: `ASX_IMPLEMENT.md` (audit 2026-10-20, audited commit 4f6ccbe). Checkout base: 613dd5d (adds RESMOM on top of
 the audited commit; it resolves no F-item). Branch `claude/laughing-hawking-c5e85r`. **Commits are local only:
