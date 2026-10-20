@@ -16,8 +16,8 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-SIGNALS = ("MOM_12_1", "RAMOM", "LOWVOL", "COMBO", "TFM_REL", "TFM_RAW", "VOL_63")
-TRADEABLE_SIGNALS = ("RAMOM", "COMBO", "LOWVOL", "TFM_REL", "TFM_RAW")
+SIGNALS = ("MOM_12_1", "RAMOM", "RESMOM", "LOWVOL", "COMBO", "TFM_REL", "TFM_RAW", "VOL_63")
+TRADEABLE_SIGNALS = ("RAMOM", "RESMOM", "COMBO", "LOWVOL", "TFM_REL", "TFM_RAW")
 
 
 class Context:
@@ -54,6 +54,12 @@ class Context:
         self.MOM_12_1 = ff.shift(21) / ff.shift(252) - 1
         self.RAMOM = (ln.shift(21) - ln.shift(252)) / (self.VOL_252 * math.sqrt(231 / 252))
         self.LOWVOL = -self.VOL_252
+        # Residual momentum: strip the VAS-beta part of each stock's daily return. Beta uses only returns up to
+        # the previous day (shift 1), and the 12-1 window ends 21 days back, so nothing after row i is used.
+        m = r[self.cfg["core_ticker"].replace(".AX", "")]
+        beta = r.rolling(756, min_periods=500).cov(m).div(m.rolling(756, min_periods=500).var(), axis=0).shift(1)
+        e = (r - beta.mul(m, axis=0)).shift(21)
+        self.RESMOM = e.rolling(231, min_periods=200).sum() / (e.rolling(231, min_periods=200).std() * math.sqrt(231))
 
         e = self.cfg
         dv = C * V
@@ -87,7 +93,7 @@ class Context:
         names = list(names)
         if not names:
             return pd.Series(dtype=float)
-        if signal in ("RAMOM", "LOWVOL", "MOM_12_1", "VOL_63"):
+        if signal in ("RAMOM", "RESMOM", "LOWVOL", "MOM_12_1", "VOL_63"):
             s = getattr(self, signal).iloc[i][names]
         elif signal == "COMBO":
             s = 0.5 * zscore(self.RAMOM.iloc[i][names]) + 0.5 * zscore(self.LOWVOL.iloc[i][names])

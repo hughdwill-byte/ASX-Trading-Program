@@ -185,6 +185,7 @@ def tfm_cache(ctx: Context, cfg: dict, args) -> int:
 def grid(signals_available: List[str], si_ok: bool) -> List[Variant]:
     vs = [Variant(signal=s, n=n, regime=r) for s in TRADEABLE_SIGNALS for n in (5, 8) for r in (False, True)]
     vs.append(Variant(signal="RAMOM", n=5, regime=False, buffer_mult=1))
+    vs.append(Variant(signal="RESMOM", n=5, regime=False, buffer_mult=1))
     vs.append(Variant(signal="RAMOM", n=5, regime=True, si_screen=True))
     for n, b in ((5, 1), (8, 3)):
         vs += [Variant(signal="RAMOM", n=n, regime=False, buffer_mult=b, rebalance=q, tax_aware=t)
@@ -449,7 +450,7 @@ def _configured_setting(cfg: dict) -> str:
 def _with_pending_day(ctx: Context) -> Context:
     """Append a placeholder next business day (prices = last close) so the engine emits next-open orders."""
     nxt = ctx.dates[-1] + pd.offsets.BDay(1)
-    for name in ("A", "C", "V", "AO", "A_last", "MDV60", "base", "VOL_252", "VOL_63", "MOM_12_1", "RAMOM", "LOWVOL"):
+    for name in ("A", "C", "V", "AO", "A_last", "MDV60", "base", "VOL_252", "VOL_63", "MOM_12_1", "RAMOM", "RESMOM", "LOWVOL"):
         f = getattr(ctx, name)
         row = ctx.A_last.iloc[[-1]] if name in ("AO",) else f.iloc[[-1]]
         if name == "base":
