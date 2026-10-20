@@ -13,7 +13,9 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from ml import dashboard_rankings as db
 from ml import validation as val
+from ml.dashboard_rankings import DASHBOARD_SCHEMA
 from ml.portfolio import (DEFAULTS, ENGINE_ID, Variant, after_tax_monthly, build_rank_cache, ew_universe,
                           run_backtest_v2)
 from ml.signals import TRADEABLE_SIGNALS, Context, tfm_cache_scores
@@ -388,7 +390,9 @@ def strat_backtest(ctx: Context, cfg: dict, args) -> int:
             compare += _period_rows(r, bench_m, ew_m, v.id, setting, extra, tax_rate=cfg.get("tax_rate", 0.0))
             trials.append({"setting": setting, "variant": v.id, "config_hash": trial_hash(v, cfg_hash),
                            "sharpe_full": val.sharpe(r["monthly"]), "timestamp": run_start})
-        per_setting[setting] = {"results": results, "bench": bench, "bench_m": bench_m}
+        per_setting[setting] = {"results": results, "bench": bench, "bench_m": bench_m,
+                                "skipped": [c for c in compare if c.get("setting") == setting and c.get("skipped_reason")
+                                            and c.get("cagr") is None]}
 
     _append_trials(trials)
 
@@ -410,16 +414,28 @@ def strat_backtest(ctx: Context, cfg: dict, args) -> int:
         wf = val.walk_forward_select(monthly, turnover)
         wf["account"] = walk_forward_account(ctx, cfg, res, wf["picks"], ranks, end)
         frozen_info = val.freeze_choice(monthly, turnover, hashes, frozen_path, setting, engine=ENGINE_ID)
+        nb_cache: Dict[str, dict] = {}
+        data["trials"] = trial_context(res, setting)   # one DSR trial context per setting (engine + dashboard)
         validation["settings"][setting] = _validate_setting(ctx, cfg, setting, res, data, ew_m, wf, frozen_info,
-                                                            frozen_path, ranks, end, signals)
+                                                            frozen_path, ranks, end, signals, nb_cache)
         compare += [{**row, "label": "walk-forward selection (one continuous account)"} for row in
                     _period_rows(wf["account"], data["bench_m"], ew_m, "WF_SELECT", setting, engine=False)
                     if row["period"] == "walk_forward"]
+        data["wf_account"], data["nb_cache"] = wf["account"], nb_cache
+
+    dashboard = {"schema": DASHBOARD_SCHEMA, "engine_id": ENGINE_ID, "config_id": cfg_hash,
+                 "calendar_id": ctx.calendar_id, "data_id": data_identity(ctx), "generated_at": pd.Timestamp.now(
+                     tz="UTC").isoformat(), "data_end": str(ctx.dates[-1].date()), "evidence": evidence_meta(), "settings": {}}
+    for setting, data in per_setting.items():
+        dashboard["settings"][setting] = dashboard_setting(ctx, cfg, setting, data, validation["settings"].get(setting, {}),
+                                                           aord_m, ew_m, ranks, end)
+    dashboard["research_id"] = db.identity({k: dashboard[k] for k in ("engine_id", "config_id", "data_id", "calendar_id")})
 
     _write_compare(compare)
     _universe_snapshot(ctx)
     _write_history(per_setting, aord_m, ew_m, cfg.get("tax_rate", 0.0))
     (RESULTS / "validation.json").write_text(json.dumps(sanitize_for_json(validation), indent=1))
+    _atomic_write(RESULTS / "dashboard.json", json.dumps(sanitize_for_json(dashboard), separators=(",", ":")))
     logger.info("strat-backtest finished in %.1f min", (time.time() - run_start) / 60)
     _print_summary(compare, validation, cfg)
     return 0
@@ -438,6 +454,142 @@ def _universe_snapshot(ctx: Context) -> None:
     pd.DataFrame({"ticker": names, "mdv60": [float(ctx.MDV60.iloc[i][t]) for t in names]}).to_csv(out, index=False)
     gone = [t for t in ctx.A.columns if ctx.age.iloc[i][t] >= 10 and ctx.age.iloc[i][t] < 260]
     (out.parent / f"unpriced_{ctx.dates[i]:%Y-%m-%d}.txt").write_text("\n".join(sorted(gone)))
+
+
+def evidence_meta() -> dict:
+    """Evidence windows from the validation metadata (W = walk-forward window, L = later window)."""
+    reg = val._registry(RESULTS / "frozen_choice.json") if (RESULTS / "frozen_choice.json").exists() else {"experiments": []}
+    current = [e for e in reg["experiments"] if not e.get("legacy")]
+    return {"windows": {
+        "W": {"start": val.PERIODS["walk_forward"][0], "end": val.PERIODS["walk_forward"][1], "label": "walk-forward window",
+              "selection_blind": False, "note": "fixed-variant results inside this window are historical diagnostics: the "
+                                                "variant set was designed with this history available"},
+        "L": {"start": val.PERIODS["hold_out"][0], "end": None, "label": "later window", "selection_blind": False,
+              "note": "already examined before the current engine; historical diagnostic, not untouched"}},
+        "freeze_at": max((e.get("timestamp") for e in current), default=None),
+        "prospective_from": max((e.get("prospective_from") for e in current if e.get("prospective_from")), default=None),
+        "limitations": [val.HOLD_OUT_NOTE,
+                        "Backtests use today's listed companies only (survivorship bias): results are likely too good.",
+                        "Prices are dividend-adjusted research prices; share quantities are not executable."]}
+
+
+def _iso_series(s: pd.Series) -> Dict[str, float]:
+    return {d.date().isoformat(): float(x) for d, x in s.items() if pd.notna(x)}
+
+
+def _variant_policy(v: Variant) -> dict:
+    return {"kind": "variant", **dataclasses.asdict(v), "horizon": 21}
+
+
+def dashboard_setting(ctx, cfg, setting, data, sv: dict, aord_m, ew_m, ranks, end) -> dict:
+    """Per-scenario rankings, evidence inputs and explanations from the in-memory research results (no re-download).
+    Diagnostics only: tiers, frozen choices and orders are untouched."""
+    bench, bench_m = data["bench"], data["bench_m"]
+    tax_rate = cfg.get("tax_rate", 0.0)
+    capital = bench["variant"].capital
+    core = float(setting.split("_core")[1])   # the bench variant itself is 100% core; the scenario is the setting
+    cohort = {"engine_id": ENGINE_ID, "calendar_id": ctx.calendar_id, "capital": capital, "core_policy": core,
+              "broker": cfg.get("broker"), "cost_basis": "modelled brokerage + tiered slippage (x1)",
+              "contributions": "none", "price_basis": "adjusted_total_return_synthetic",
+              "start": str(bench_m.index[0].date()), "end": str(bench_m.index[-1].date())}
+    cohort_id = db.identity(cohort)
+    bmet = {p: val.metrics(bench, bench_m, ew_m, p) for p in val.PERIODS}
+    after_tax = lambda r: after_tax_monthly(r, tax_rate)
+    bench_at = after_tax(bench)
+
+    def record(mid, label, kind, r, policy, status="ok", reason=None):
+        if r is None:
+            return {"method_id": mid, "label": label, "kind": kind, "status": status, "reason": reason, "policy": policy,
+                    "cohort": cohort}
+        m = r["monthly"]
+        at = after_tax(r) if kind != "walk_forward_account" else None
+        rec = {"method_id": mid, "label": label, "kind": kind, "status": status, "reason": reason, "policy": policy,
+               "cohort": {**cohort, "start": str(m.index[0].date()) if len(m) else None,
+                          "end": str(m.index[-1].date()) if len(m) else None},
+               "monthly": _iso_series(m), "full": val.metrics(r, bench_m, ew_m, "full"),
+               "costs_aud": float(r["costs"]["brokerage"] + r["costs"]["slippage"]) if r.get("costs") else None}
+        if at is not None and not at.attrs.get("unpaid_tax"):
+            rec["monthly_after_tax"] = _iso_series(at)
+        elif at is not None:
+            rec["after_tax_note"] = f"estimated tax due after the data ends is not in the series: {at.attrs['unpaid_tax']}"
+            rec["monthly_after_tax"] = _iso_series(at)
+        return rec
+
+    bench_rec = record("BENCH_TR", "VAS total-return benchmark", "benchmark", bench, {"kind": "benchmark"})
+    if not bench_at.attrs.get("unpaid_tax"):
+        bench_rec["monthly_after_tax"] = _iso_series(bench_at)
+    bench_rec["dates"] = [d.date().isoformat() for d in bench_m.index]
+    methods = []
+    frozen = (sv.get("frozen") or {}).get("variant")
+    tier = sv.get("tier")
+    _, trial_srs, n_trials = data.get("trials") or trial_context({k: r for k, r in data["results"].items()
+                                                                  if r["n_eff"]}, setting)
+    funded = {k: r for k, r in data["results"].items() if r["n_eff"]}
+    for vid, r in sorted(data["results"].items()):
+        v: Variant = r["variant"]
+        if not r["n_eff"]:
+            methods.append(record(vid, None, "strategy", None, _variant_policy(v), "unfunded",
+                                  r["skipped_reason"] or "cannot fund the minimum positions"))
+            continue
+        rec = record(vid, None, "strategy", r, _variant_policy(v))
+        W, L = (val.metrics(r, bench_m, ew_m, p) for p in ("walk_forward", "hold_out"))
+        nb = evaluate_neighbours(ctx, cfg, setting, v, funded, bench_m, ew_m, bmet, ranks, end, data.get("nb_cache"))
+        dsr = val.dsr(r["monthly"].to_numpy(), trial_srs, n_trials)
+        span = r["monthly"].loc[pd.Timestamp(val.PERIODS["walk_forward"][0]):]
+        years = db.calendar_years(_iso_series(span), _iso_series(bench_m), [d.date().isoformat() for d in span.index])
+        rec["evidence"] = {"W": W, "L": L, "VAS_W": bmet["walk_forward"], "VAS_L": bmet["hold_out"], "dsr": dsr["dsr"],
+                           "dsr_detail": {**dsr, "sample": "full frozen-series convention (all months)",
+                                          "trial_window": "selection window before 2024-07-01"},
+                           "neighbours": {"evaluated": len(nb), "passed": sum(n["passes_a_full"] for n in nb), "rows": nb},
+                           "years": [y for y in years if y["complete"]]}
+        if vid == frozen:
+            group = {"LIVE": "passed", "PAPER": "paper"}.get(tier, "exploratory")
+            rec["qualification"] = {"group": group, "assessment": {"LIVE": "passed", "PAPER": "paper"}.get(tier, "failed"),
+                                    "source": "engine acceptance (chosen before testing)", "reasons": sv.get("reasons", [])}
+        else:
+            rec["qualification"] = {"group": "exploratory", "assessment": "not_assessed",
+                                    "source": "no engine assessment (only the frozen candidate is assessed)", "reasons": []}
+        rec["years_all"] = years
+        methods.append(rec)
+    for sk in data.get("skipped", []):
+        methods.append({"method_id": sk["id"], "kind": "strategy", "status": "not_run", "reason": sk["skipped_reason"],
+                        "policy": None, "cohort": cohort})
+    if data.get("wf_account") is not None and len(data["wf_account"]["monthly"]):
+        methods.append(record("WF_SELECT", "Walk-forward switching account", "walk_forward_account", data["wf_account"],
+                              {"kind": "walk_forward_account", "schedule": data["wf_account"].get("schedule")}))
+    references = [{"method_id": k, "kind": "reference", "label": lbl, "monthly": _iso_series(m),
+                   "basis": basis} for k, lbl, m, basis in (
+        ("EW_UNIV", "Equal-weight screened universe", ew_m, "gross, no costs, not investable"),
+        ("AORD_PRICE", "^AORD price index", aord_m, "price only, no dividends, not investable"))]
+    hist = {b: db.historical_ranking(methods, bench_rec, b) for b in ("pre_tax", "after_tax_estimate")}
+    ev = db.evidence_ranking([m for m in methods if m.get("kind") == "strategy"],
+                             {"pbo": (sv.get("pbo") or {}).get("pbo"), "combinations": (sv.get("pbo") or {}).get("combinations"),
+                              "window": "selection window before 2024-07-01", "cohort": "funded grid variants"})
+    ranked = {r["method_id"]: r for r in hist["pre_tax"]["rows"]}
+    scored = {r["method_id"]: r for g in ev["groups"] for r in g["rows"]}
+    missing = {r["method_id"]: r.get("missing", []) for r in ev["not_scored"]}
+    out_methods = {}
+    for m in methods:
+        mid = m["method_id"]
+        q = m.get("qualification") or {}
+        out_methods[mid] = {
+            "what_it_does": db.describe_method(mid, m.get("policy")), "policy": m.get("policy"), "status": m.get("status"),
+            "reason": m.get("reason"), "qualification": q, "research_only": False,
+            "why_historical": db.historical_explanation(ranked.get(mid), ranked.get("BENCH_TR"), m.get("years_all", []),
+                                                        cohort_id, hist["pre_tax"]["common_interval"]),
+            "why_rank": db.rank_explanation(scored.get(mid), q.get("reasons", []) if q.get("assessment") == "failed" else [],
+                                            missing.get(mid, []), cohort_id)}
+    out_methods["BENCH_TR"] = {"what_it_does": db.describe_method("BENCH_TR", None), "status": "ok",
+                               "why_historical": db.historical_explanation(ranked.get("BENCH_TR"), ranked.get("BENCH_TR"),
+                                                                           [], cohort_id, hist["pre_tax"]["common_interval"]),
+                               "why_rank": {"available": False, "reason": "reference and fallback: not evidence-scored",
+                                            "facts": []}}
+    for ref in references:
+        out_methods[ref["method_id"]] = {"what_it_does": db.describe_method(ref["method_id"], None), "status": "reference"}
+    return {"cohort": cohort, "cohort_id": cohort_id, "tier": tier, "frozen": frozen,
+            "historical": hist, "evidence": ev, "references": [{k: v for k, v in r.items() if k != "monthly"} | {
+                "total_return": (db.compound(list(r["monthly"].values())) - 1) if r["monthly"] else None} for r in references],
+            "methods": out_methods}
 
 
 def config_identity(cfg: dict) -> str:
@@ -494,7 +646,8 @@ def _variant_fields(v: Variant) -> dict:
             "core_weight": v.core_weight, "capital": v.capital, "si_screen": v.si_screen}
 
 
-def _validate_setting(ctx, cfg, setting, res, data, ew_m, wf, frozen_info, frozen_path, ranks, end, signals) -> dict:
+def _validate_setting(ctx, cfg, setting, res, data, ew_m, wf, frozen_info, frozen_path, ranks, end, signals,
+                      nb_cache: Optional[Dict[str, dict]] = None) -> dict:
     bench_m = data["bench_m"]
     bench = data["bench"]
     # Hold-out is only evaluated after the frozen choice exists on disk.
@@ -509,33 +662,13 @@ def _validate_setting(ctx, cfg, setting, res, data, ew_m, wf, frozen_info, froze
         bench_m, ew_m, "walk_forward")
 
     # Trial statistics up to 2024-06 (selection data only).
-    cut = pd.Timestamp("2024-07-01")
-    selection = {k: x["monthly"].loc[x["monthly"].index < cut] for k, x in res.items()}
-    trial_srs = [s.mean() / s.std() for s in selection.values() if len(s) > 12 and s.std() > 0]
-    n_trials = max(_trial_count(setting), len(trial_srs), 22)
+    selection, trial_srs, n_trials = data["trials"]
     dsr_frozen = val.dsr(r["monthly"].to_numpy(), trial_srs, n_trials)
     dsr_wf = val.dsr(val.window(wf["account"]["monthly"], "walk_forward").to_numpy(), trial_srs, n_trials)
     M = pd.DataFrame(selection).dropna()
     pbo = val.pbo_cscv(M.to_numpy(), S=10)
 
-    # Neighbours: differ in exactly one of N, regime, buffer.
-    neighbours = [dataclasses.replace(v, n=8 if v.n == 5 else 5), dataclasses.replace(v, regime=not v.regime),
-                  dataclasses.replace(v, buffer_mult=1 if v.buffer_mult != 1 else 3)]
-    nb_rows, extra_trials = [], []
-    for nv in neighbours:
-        nr = res.get(nv.id) or run_backtest_v2(ctx, nv, cfg, ranks, end)
-        if nv.id not in res:
-            extra_trials.append({"setting": setting, "variant": nv.id, "config_hash": trial_hash(nv, config_identity(cfg)),
-                                 "sharpe_full": val.sharpe(nr["monthly"]), "timestamp": time.time()})
-        # full criterion (a) for a fixed-policy neighbour: its own walk-forward window AND later window beat VAS
-        beats = lambda m, b: m.get("cagr", -1) > b.get("cagr", 0) and m.get("sharpe", -9) >= b.get("sharpe", 9)
-        nm = val.metrics(nr, bench_m, ew_m, "walk_forward")
-        nh = val.metrics(nr, bench_m, ew_m, "hold_out")
-        ok = beats(nm, bmet["walk_forward"]) and beats(nh, bmet["hold_out"])
-        nb_rows.append({"variant": nv.id, "passes_a_wf": bool(ok), "passes_a_full": bool(ok), "cagr": nm.get("cagr"),
-                        "sharpe": nm.get("sharpe"), "cagr_later": nh.get("cagr"), "sharpe_later": nh.get("sharpe"),
-                        "window": "fixed-policy walk_forward and hold_out windows"})
-    _append_trials(extra_trials)
+    nb_rows = evaluate_neighbours(ctx, cfg, setting, v, res, bench_m, ew_m, bmet, ranks, end, nb_cache)
 
     stress = run_backtest_v2(ctx, dataclasses.replace(v, slip_mult=cfg["cost_stress_mult"]), cfg, ranks, end)
     stress_met = val.metrics(stress, bench_m, ew_m, "full")
@@ -563,6 +696,43 @@ def _validate_setting(ctx, cfg, setting, res, data, ew_m, wf, frozen_info, froze
         "calendar_years": {str(y): row for y, row in yearly.to_dict("index").items()},
         "stress_windows": windows, **decision,
     }
+
+
+def trial_context(res: Dict[str, dict], setting: str):
+    """Selection-window (before 2024-07) monthly series, their per-period SRs and the trial count used for DSR."""
+    cut = pd.Timestamp("2024-07-01")
+    selection = {k: x["monthly"].loc[x["monthly"].index < cut] for k, x in res.items()}
+    trial_srs = [s.mean() / s.std() for s in selection.values() if len(s) > 12 and s.std() > 0]
+    return selection, trial_srs, max(_trial_count(setting), len(trial_srs), 22)
+
+
+def registered_neighbours(v: Variant) -> List[Variant]:
+    """Neighbours: differ in exactly one of N, regime, buffer."""
+    return [dataclasses.replace(v, n=8 if v.n == 5 else 5), dataclasses.replace(v, regime=not v.regime),
+            dataclasses.replace(v, buffer_mult=1 if v.buffer_mult != 1 else 3)]
+
+
+def evaluate_neighbours(ctx, cfg, setting, v: Variant, res: Dict[str, dict], bench_m, ew_m, bmet, ranks, end,
+                        cache: Optional[Dict[str, dict]] = None) -> List[dict]:
+    """Full criterion (a) for each registered neighbour of `v` (its own fixed-policy walk-forward AND later windows
+    beat VAS). Neighbours not in the grid are run and registered as trials (cache avoids duplicate runs/trials)."""
+    cache = {} if cache is None else cache
+    nb_rows, extra_trials = [], []
+    beats = lambda m, b: m.get("cagr", -1) > b.get("cagr", 0) and m.get("sharpe", -9) >= b.get("sharpe", 9)
+    for nv in registered_neighbours(v):
+        nr = res.get(nv.id) or cache.get(nv.id)
+        if nr is None:
+            nr = cache[nv.id] = run_backtest_v2(ctx, nv, cfg, ranks, end)
+            extra_trials.append({"setting": setting, "variant": nv.id, "config_hash": trial_hash(nv, config_identity(cfg)),
+                                 "sharpe_full": val.sharpe(nr["monthly"]), "timestamp": time.time()})
+        nm = val.metrics(nr, bench_m, ew_m, "walk_forward")
+        nh = val.metrics(nr, bench_m, ew_m, "hold_out")
+        ok = beats(nm, bmet["walk_forward"]) and beats(nh, bmet["hold_out"])
+        nb_rows.append({"variant": nv.id, "passes_a_wf": bool(ok), "passes_a_full": bool(ok), "cagr": nm.get("cagr"),
+                        "sharpe": nm.get("sharpe"), "cagr_later": nh.get("cagr"), "sharpe_later": nh.get("sharpe"),
+                        "window": "fixed-policy walk_forward and hold_out windows"})
+    _append_trials(extra_trials)
+    return nb_rows
 
 
 def _trial_count(setting: str) -> int:
@@ -664,6 +834,8 @@ def strat_recommend(ctx: Context, cfg: dict, args, today: Optional[pd.Timestamp]
     holdings_path = getattr(args, "holdings", None) or cfg.get("holdings_file")
     account = import_holdings(holdings_path) if holdings_path else None
     proposals, book, paper = [], {}, None
+    allocation = {"status": "not_applicable", "reason": "no stock strategy is being tracked for this scenario "
+                                                         "(benchmark fallback); there is no research book to show"}
     is_decision_day = (last + pd.offsets.BDay(1)).month != last.month
     if tier in ("LIVE", "PAPER") and vid and data_state == "current":
         from ml.policy_spec import decode
@@ -672,6 +844,7 @@ def strat_recommend(ctx: Context, cfg: dict, args, today: Optional[pd.Timestamp]
         r = run_backtest_v2(ctx, v, cfg)    # hypothetical research book, valued through the latest session
         book = {k: int(q) for k, q in r["final_book"].items() if q}
         paper = {"date": r["valuation_date"].date().isoformat(), "nav": float(r["equity"].iloc[-1]), "book": book}
+        allocation = paper_allocation(ctx, r)
         if is_decision_day:
             rp = run_backtest_v2(_with_pending_day(copy.copy(ctx)), v, cfg)   # copy: the real ctx keeps no fake row
             o = rp["orders"]
@@ -706,7 +879,10 @@ def strat_recommend(ctx: Context, cfg: dict, args, today: Optional[pd.Timestamp]
            "generated_at": pd.Timestamp.now(tz="UTC").isoformat(), "reasons": reasons, "setting": setting,
            "broker_execution_state": "none: this program places no orders",
            "paper_proposals": proposals, "orders_next_open": proposals, "execution_orders": [],
-           "execution_blockers": blockers, "paper_book": paper,
+           "execution_blockers": blockers, "paper_book": paper, "allocation": allocation,
+           "price_date": last.date().isoformat(), "data_age_business_days": int(data_age),
+           "next_review": (last + pd.offsets.BMonthEnd(0)).date().isoformat(),
+           "freshness_rule": "current when the last price session is at most 3 business days old (producer rule)",
            "account": {k: account[k] for k in ("source", "account_hash", "as_of", "cash")} if account else None,
            "reconciliation": reconciliation, "engine_id": ENGINE_ID}
     _survivorship_log(ctx, cfg)
@@ -718,6 +894,25 @@ def strat_recommend(ctx: Context, cfg: dict, args, today: Optional[pd.Timestamp]
     for reason in reasons + blockers:
         print("  -", reason)
     return 0
+
+
+def paper_allocation(ctx: Context, r: dict) -> dict:
+    """Actual weights of the hypothetical research book on pre-trade total NAV (cash included), from the engine's
+    shares and marks at the valuation date. Never inferred from holding names."""
+    when = r["valuation_date"]
+    nav = float(r["equity"].loc[when])
+    marks = ctx.A_last.loc[when]
+    frozen = set(r.get("frozen") or [])
+    rows = []
+    for t, q in sorted(r["final_book"].items()):
+        if not q:
+            continue
+        mark = float(marks[t]) * ((1 - ctx.cfg["stale_haircut"]) if t in frozen else 1.0)
+        rows.append({"ticker": t, "shares": int(q), "value": q * mark, "weight": q * mark / nav, "frozen": t in frozen})
+    rows.sort(key=lambda x: -x["value"])
+    return {"status": "ok", "valuation_date": when.date().isoformat(), "nav": nav, "weight_basis": "total NAV incl. cash",
+            "price_basis": "adjusted research prices (not executable quantities)", "actual_count": len(rows),
+            "holdings": rows, "cash": float(r["cash"]), "cash_weight": float(r["cash"]) / nav}
 
 
 def _paper_append(vid: str, as_of: pd.Timestamp, r: dict) -> None:
@@ -751,6 +946,56 @@ def _survivorship_log(ctx: Context, cfg: dict) -> None:
         pd.DataFrame(rows).to_csv(path, mode="a", header=not path.exists(), index=False)
 
 
+DISPLAY_SCHEMA = "asx_research_display_v1"   # UI/publication contract version (not an engine identity)
+
+
+def publication_state(validation: dict, dashboard: Optional[dict], rec: dict) -> dict:
+    """Manifest across the published files. Rankings are only published when the dashboard artifact matches the
+    validation engine/config; otherwise the page says research needs refreshing (not negative evidence)."""
+    out = {"engine_id": validation.get("engine_id"), "config_id": validation.get("config_id"),
+           "calendar_id": validation.get("calendar_id"), "published_at": pd.Timestamp.now(tz="UTC").isoformat(),
+           "recommendation_engine_id": rec.get("engine_id"), "state": "ok", "reasons": [],
+           "rankings_state": "ok", "rankings_reasons": []}
+    if not validation:
+        out.update(state="needs_research_refresh", reasons=["no research results (validation.json missing)"],
+                   rankings_state="needs_research_refresh", rankings_reasons=["no research results"])
+        return out
+    if validation.get("engine_id") != ENGINE_ID:
+        out["reasons"].append("research was produced by a different engine version")
+    if rec and rec.get("engine_id") not in (None, ENGINE_ID):
+        out["reasons"].append("recommendation was produced by a different engine version")
+    rr = out["rankings_reasons"]
+    if dashboard is None:
+        rr.append("no ranking artifact (dashboard.json) from the research run yet")
+    else:
+        if dashboard.get("schema") != DASHBOARD_SCHEMA:
+            rr.append(f"unknown ranking schema {dashboard.get('schema')!r}")
+        for k in ("engine_id", "config_id"):
+            if dashboard.get(k) != validation.get(k):
+                rr.append(f"ranking artifact {k} does not match validation (mixed research versions)")
+        out.update({"research_id": dashboard.get("research_id"), "data_id": dashboard.get("data_id"),
+                    "research_generated_at": dashboard.get("generated_at"), "research_data_end": dashboard.get("data_end")})
+    if out["reasons"]:
+        out["state"] = "needs_research_refresh"
+        rr.extend(out["reasons"])
+    if rr:
+        out["rankings_state"] = "needs_research_refresh"
+    return out
+
+
+def scenarios(validation: dict, rec: dict, cfg: dict) -> Dict[str, dict]:
+    """Per-setting research result (exact setting only; nothing inherited from nearby capital)."""
+    out = {}
+    for cap, core in SETTINGS:
+        key = f"{int(cap)}_core{core:g}"
+        sv = validation.get("settings", {}).get(key)
+        out[key] = {"capital": cap, "core_policy": core, "broker": cfg.get("broker"),
+                    "evaluated": sv is not None, "tier": (sv or {}).get("tier"), "reasons": (sv or {}).get("reasons", []),
+                    "chosen_before_testing": ((sv or {}).get("frozen") or {}).get("variant"),
+                    "is_published_recommendation": rec.get("setting") == key}
+    return out
+
+
 def strat_publish(cfg: dict, results_dir: pathlib.Path = RESULTS, out: Optional[pathlib.Path] = None) -> int:
     out = out or project_path("docs", "data", "latest.json")
     RESULTS = results_dir  # noqa: N806 - local override for tests
@@ -766,13 +1011,21 @@ def strat_publish(cfg: dict, results_dir: pathlib.Path = RESULTS, out: Optional[
         passes = sv.get("passes") if sv.get("frozen", {}).get("variant") == row.get("id") else None
         rows.append({**row, "passes": passes, "is_frozen": passes is not None})
     cache_files = sorted(project_path("data", "tfm_cache").glob("*_*.csv"))
+    dash_path = RESULTS / "dashboard.json"
+    dashboard = json.loads(dash_path.read_text()) if dash_path.exists() else None
+    publication = publication_state(validation, dashboard, rec)
     if not (rec or compare or validation) and payload.get("strategy_comparison"):
         print(f"No strategy results in {RESULTS}; keeping the last good publication ({payload.get('strategy_published_at')}).")
         return 0
     payload.update({
+        "display_schema": DISPLAY_SCHEMA,
+        "publication": publication,
+        "scenarios": scenarios(validation, rec, cfg),
+        "dashboard": dashboard if publication["rankings_state"] == "ok" else None,
         "recommendation": {k: rec.get(k) for k in ("tier", "strategy_id", "action_text", "as_of", "reasons", "setting",
                                                    "data_state", "validation_tier", "broker_execution_state",
-                                                   "execution_blockers", "generated_at")}
+                                                   "execution_blockers", "generated_at", "allocation", "price_date",
+                                                   "data_age_business_days", "next_review", "freshness_rule", "paper_book")}
         if rec else {"tier": "FALLBACK", "action_text": FALLBACK_TEXT.format(core=cfg["core_ticker"]), "reasons": []},
         "strategy_comparison": rows,
         "orders_next_open": rec.get("paper_proposals", rec.get("orders_next_open", [])),
@@ -781,8 +1034,9 @@ def strat_publish(cfg: dict, results_dir: pathlib.Path = RESULTS, out: Optional[
         "strategy_published_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "benchmark_note": BENCH_NOTE,
         "broker": cfg.get("broker"),
-        "validation_summary": {s: {k: v.get(k) for k in ("tier", "frozen", "dsr_frozen", "pbo", "neighbours",
-                                                         "walk_forward_picks", "survivorship", "stress_windows")}
+        "validation_summary": {s: {k: v.get(k) for k in ("tier", "frozen", "dsr_frozen", "dsr_wf_select", "pbo",
+                                                         "neighbours", "walk_forward_picks", "survivorship", "stress_windows",
+                                                         "reasons", "passes", "capacity", "hold_out_note", "wf_select")}
                                for s, v in setting_status.items()},
         "signal_ic": validation.get("ic"),
         "history": json.loads((RESULTS / "history.json").read_text()) if (RESULTS / "history.json").exists() else None,

@@ -54,6 +54,7 @@ jobs:
           python ml/test_optimizer.py
           python ml/test_accounting.py
           python ml/test_policies.py
+          python ml/test_dashboard.py
       - name: Download ASX prices
         run: time python stocktrade.py --log-level WARNING ingest
       - name: Download ASIC short-position history (optional)
@@ -88,7 +89,7 @@ jobs:
         run: |
           git add results/strategy_compare.csv results/strategy_compare.json results/validation.json \
                   results/frozen_choice.json results/trials_log.csv results/history.json \
-                  results/instrument_types.json
+                  results/instrument_types.json results/dashboard.json
           if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
