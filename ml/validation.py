@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import math
-import os
 import pathlib
 import time
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -125,9 +125,12 @@ def newey_west_t(x: Sequence[float], lags: int = 3) -> float:
     return float(x.mean() / math.sqrt(var / n)) if var > 0 else float("nan")
 
 
-def rank_ic(ctx, signal: str, rows: List[int], bench: pd.Series, horizon: int = 21) -> Dict[str, float]:
-    """Monthly Spearman IC: score at t vs next-21-day return minus the benchmark's (1-day embargo not needed:
-    labels start at close t and decisions are monthly, so labels do not overlap)."""
+def rank_ic(ctx, signal: str, rows: List[int], bench: pd.Series = None, horizon: int = 21) -> Dict[str, float]:
+    """Monthly Spearman IC between the score at the close of i and the TRADED label: entry at the open of i+1,
+    exit at the close of i+horizon (both known only after the decision). Subtracting a common benchmark return
+    would not change cross-sectional ranks (nor neutralise beta), so none is subtracted; `bench` is kept for
+    call compatibility. Monthly decisions with a 21-session horizon do not overlap; NW(3) t-stat allows for
+    residual serial dependence."""
     ics, dates = [], []
     for i in rows:
         if i + horizon >= len(ctx.dates):
@@ -136,22 +139,31 @@ def rank_ic(ctx, signal: str, rows: List[int], bench: pd.Series, horizon: int = 
         s = ctx.scores(signal, i, names)
         if len(s) < 10:
             continue
-        fwd = ctx.A_last.iloc[i + horizon][s.index] / ctx.A_last.iloc[i][s.index] - 1
-        b = bench.iloc[i + horizon] / bench.iloc[i] - 1
+        fwd = (ctx.A_last.iloc[i + horizon][s.index] / ctx.AO.iloc[i + 1][s.index] - 1).replace([np.inf, -np.inf], np.nan)
         ok = fwd.notna()
         if ok.sum() < 10:
             continue
-        ics.append(spearmanr(s[ok], fwd[ok] - b).statistic)
+        ics.append(spearmanr(s[ok], fwd[ok]).statistic)
         dates.append(ctx.dates[i])
     ics = np.array(ics, dtype=float)
     return {"mean_ic": float(np.nanmean(ics)) if len(ics) else float("nan"),
             "nw_t": newey_west_t(ics, 3), "pct_positive": float(np.mean(ics > 0)) if len(ics) else float("nan"),
-            "months": int(len(ics))}
+            "months": int(len(ics)), "label": f"next open -> close +{horizon} sessions (adjusted)"}
 
 
 # ---- metrics table -------------------------------------------------------------------------
 
-def metrics(result: Dict, bench_m: pd.Series, ew_m: pd.Series, period: str) -> Dict[str, float]:
+def daily_drawdown(equity: pd.Series) -> float:
+    """Daily marked-to-market max drawdown (the start NAV counts as a peak)."""
+    eq = equity.dropna()
+    return float((eq / eq.cummax() - 1).min()) if len(eq) else float("nan")
+
+
+def metrics(result: Dict, bench_m: pd.Series, ew_m: pd.Series, period: str, cash_rate: float = 0.0) -> Dict[str, float]:
+    """Monthly metrics over a period. `sharpe` = zero-rate Sharpe (x sqrt 12); `sharpe_cash_excess` subtracts
+    `cash_rate` (annual); `ir` = information ratio vs the benchmark; `mdd` = month-end drawdown (gate e);
+    `mdd_daily` = daily marked-to-market drawdown (diagnostic); `sortino` uses downside deviation over ALL
+    months versus a 0 target."""
     m = window(result["monthly"], period)
     b = bench_m.reindex(m.index)
     e = ew_m.reindex(m.index)
@@ -173,7 +185,7 @@ def metrics(result: Dict, bench_m: pd.Series, ew_m: pd.Series, period: str) -> D
     sells = float(o.loc[o["side"] == "SELL", "value"].sum()) if len(o) else 0.0
     brok = float(o["brokerage"].sum()) if len(o) else 0.0
     slip_cost = float(o["slippage"].sum()) if len(o) else 0.0
-    downside = m[m < 0].std()
+    downside = float(np.sqrt(np.mean(np.minimum(m.to_numpy(), 0.0) ** 2)))
     holds = [h for h in result["holdings"] if h["exit"] is not None
              and pd.Timestamp(h["exit"]) >= m.index[0] - pd.offsets.MonthEnd(1) and pd.Timestamp(h["exit"]) <= m.index[-1]]
     days = [(pd.Timestamp(h["exit"]) - pd.Timestamp(h["entry"])).days for h in holds]
@@ -182,6 +194,9 @@ def metrics(result: Dict, bench_m: pd.Series, ew_m: pd.Series, period: str) -> D
         "cagr": cagr(m), "vol": float(m.std() * math.sqrt(12)), "sharpe": sharpe(m),
         "sortino": float(m.mean() / downside * math.sqrt(12)) if downside and downside > 0 else float("nan"),
         "mdd": max_drawdown(m),
+        "mdd_daily": daily_drawdown(eq.loc[(eq.index >= m.index[0] - pd.offsets.MonthEnd(1)) & (eq.index <= m.index[-1])]),
+        "sharpe_cash_excess": sharpe(m - cash_rate / 12),
+        "nav_invalid": bool((eq <= 0).any()),
         "hit_rate": float((ex > 0).mean()) if len(ex) else float("nan"),
         "turnover": sells / avg_eq / years if avg_eq else float("nan"),
         "orders_per_year": len(o) / years,
@@ -214,8 +229,27 @@ def cost_drag(result: Dict) -> Dict[str, float]:
 
 # ---- selection -----------------------------------------------------------------------------
 
-def walk_forward_select(monthly: Dict[str, pd.Series], turnover: Dict[str, float]) -> Dict[str, object]:
-    """On each 1 July, pick the variant with the best net Sharpe using only months before that date."""
+def turnover_before(result: Dict, cut: pd.Timestamp) -> float:
+    """Annual sell turnover / average equity using only orders and equity before `cut` (tie-break input)."""
+    eq = result["equity"]
+    eq = eq.loc[eq.index < cut]
+    o = result["orders"]
+    if not len(eq) or float(eq.mean()) <= 0:
+        return 0.0
+    sells = float(o.loc[(o["side"] == "SELL") & (o["date"] < cut), "value"].sum()) if len(o) else 0.0
+    years = max((eq.index[-1] - eq.index[0]).days / 365.25, 1 / 12)
+    return sells / float(eq.mean()) / years
+
+
+def _turnover_at(turnover, vid: str, cut: pd.Timestamp) -> float:
+    return float(turnover(vid, cut)) if callable(turnover) else float(turnover.get(vid, 0.0))
+
+
+def walk_forward_select(monthly: Dict[str, pd.Series], turnover) -> Dict[str, object]:
+    """On each 1 July, pick the variant with the best net Sharpe using only months before that date (ties: lower
+    turnover before that date; `turnover` is a function (variant, cut) or a dict for tests). `monthly` here is
+    the spliced series of each pick's own account - a DIAGNOSTIC only; the investable walk-forward is the
+    continuous account built by `portfolio.run_backtest_v2(schedule=picks)`."""
     pieces, picks = [], []
     for y in WF_YEARS:
         cut = pd.Timestamp(f"{y}-07-01")
@@ -223,41 +257,73 @@ def walk_forward_select(monthly: Dict[str, pd.Series], turnover: Dict[str, float
         for vid, s in monthly.items():
             past = s.loc[s.index < cut]
             if len(past) >= 12:
-                scored.append((sharpe(past), -turnover.get(vid, 0.0), vid))
+                scored.append((sharpe(past), -_turnover_at(turnover, vid, cut), vid))
         if not scored:
             continue
         scored.sort(reverse=True)
         vid = scored[0][2]
-        picks.append({"year": y, "variant": vid})
+        picks.append({"year": y, "variant": vid, "from": cut.date().isoformat()})
         nxt = monthly[vid]
         pieces.append(nxt.loc[(nxt.index >= cut) & (nxt.index < pd.Timestamp(f"{y + 1}-07-01"))])
     series = pd.concat(pieces) if pieces else pd.Series(dtype=float)
     return {"monthly": series, "picks": picks}
 
 
-def freeze_choice(monthly: Dict[str, pd.Series], turnover: Dict[str, float], hashes: Dict[str, str],
-                  path: pathlib.Path, setting: str) -> Dict[str, object]:
+HOLD_OUT_NOTE = ("July 2024 onwards was already examined before these repairs: for any new change it is historical "
+                 "diagnostic evidence, not an untouched hold-out. Only data after an experiment's freeze time is "
+                 "prospective.")
+
+
+def _registry(path: pathlib.Path) -> Dict[str, object]:
+    raw = json.loads(path.read_text()) if path.exists() else {}
+    if raw.get("schema") == "frozen_registry_v1":
+        return raw
+    legacy = [{"setting": k, **v, "experiment_id": f"legacy-{v.get('config_hash')}", "legacy": True}
+              for k, v in raw.items() if isinstance(v, dict)]
+    return {"schema": "frozen_registry_v1", "experiments": legacy}
+
+
+def experiment_id(hashes: Dict[str, str], cut: str, setting: str, engine: str = "") -> str:
+    blob = json.dumps({"hashes": sorted(hashes.values()), "cut": cut, "setting": setting, "engine": engine})
+    return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+
+def freeze_choice(monthly: Dict[str, pd.Series], turnover, hashes: Dict[str, str],
+                  path: pathlib.Path, setting: str, engine: str = "") -> Dict[str, object]:
+    """Append-only experiment registry. The same candidate set (variant hashes + selection cut + engine id) reuses
+    its original frozen choice; a changed set registers a NEW experiment. Entries are never deleted or rewritten."""
     cut = pd.Timestamp("2024-07-01")
-    scored = [(sharpe(s.loc[s.index < cut]), -turnover.get(v, 0.0), v) for v, s in monthly.items()
+    reg = _registry(path)
+    eid = experiment_id(hashes, "2024-07-01", setting, engine)
+    for e in reg["experiments"]:
+        if e.get("experiment_id") == eid and e.get("setting") == setting:
+            return {**e, "reused": True}
+    scored = [(sharpe(s.loc[s.index < cut]), -_turnover_at(turnover, v, cut), v) for v, s in monthly.items()
               if len(s.loc[s.index < cut]) >= 12]
     scored.sort(reverse=True)
     vid = scored[0][2]
-    choices = json.loads(path.read_text()) if path.exists() else {}
-    choices[setting] = {"variant": vid, "config_hash": hashes[vid], "timestamp": time.time(),
-                        "selected_using_data_before": "2024-07-01"}
+    entry = {"setting": setting, "experiment_id": eid, "variant": vid, "config_hash": hashes[vid],
+             "timestamp": time.time(), "selected_using_data_before": "2024-07-01", "candidates": len(hashes),
+             "prospective_from": pd.Timestamp.now().date().isoformat(), "hold_out_note": HOLD_OUT_NOTE}
+    reg["experiments"].append(entry)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(choices, indent=2))
-    return choices[setting]
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(reg, indent=2))
+    tmp.replace(path)
+    return {**entry, "reused": False}
 
 
-def hold_out_gate(path: pathlib.Path, setting: str, evaluation_start: float) -> str:
-    """Raise unless the frozen choice exists and was written before this hold-out evaluation began."""
+def hold_out_gate(path: pathlib.Path, setting: str, evaluation_start: float, eid: Optional[str] = None) -> str:
+    """Raise unless a frozen choice for this setting (and experiment, when given) exists and was registered
+    before this hold-out evaluation began."""
     if not path.exists():
         raise RuntimeError("Hold-out evaluation refused: results/frozen_choice.json is missing.")
-    choice = json.loads(path.read_text()).get(setting)
-    if not choice:
+    found = [e for e in _registry(path)["experiments"] if e.get("setting") == setting
+             and (eid is None or e.get("experiment_id") == eid)]
+    if not found:
         raise RuntimeError(f"Hold-out evaluation refused: no frozen choice for {setting}.")
-    if os.path.getmtime(path) > evaluation_start or choice["timestamp"] > evaluation_start:
+    choice = found[-1]
+    if choice["timestamp"] > evaluation_start:
         raise RuntimeError("Hold-out evaluation refused: frozen choice is newer than the evaluation start.")
     return choice["variant"]
 
@@ -278,15 +344,17 @@ def acceptance(frozen: Dict[str, float], frozen_full: Dict[str, float], wf: Dict
         "i": bool(n_eff >= 3),
     }
     labels = {
-        "a": "walk-forward and hold-out must both beat the benchmark on CAGR and Sharpe",
-        "b": "full-period excess return after a 1.5%/yr survivorship haircut must be positive",
-        "c": "deflated Sharpe ratio must be at least 0.95",
-        "d": "probability of backtest overfitting must be at most 0.25",
-        "e": "max drawdown must be within 5 points of the benchmark's",
-        "f": "cost drag must be at most 1.0% a year",
-        "g": "at least 2 of 3 neighbouring settings must also pass (a)",
-        "h": "annual excess must be positive with a 90% CI lower bound above -1%",
-        "i": "satellite must hold at least 3 positions at this capital",
+        "a": "investable walk-forward selection AND the frozen choice's later window must both beat VAS "
+             "(CAGR strictly greater, zero-rate Sharpe at least VAS's)",
+        "b": "full-period annual arithmetic excess minus a fixed 1.5-point hurdle must be positive "
+             "(a hurdle/sensitivity, not a survivorship correction)",
+        "c": "deflated Sharpe ratio (full frozen series; trial variance from the selection window) must be at least 0.95",
+        "d": "probability of backtest overfitting (CSCV on the selection window) must be at most 0.25",
+        "e": "month-end max drawdown must be within 5 points of VAS's",
+        "f": "annual cost drag (brokerage + slippage) must be at most 1.0%",
+        "g": "at least 2 of 3 registered neighbours must pass the full criterion (a)",
+        "h": "annual excess must be positive with a 90% block-bootstrap CI lower bound above -1%",
+        "i": "minimum fee-aware funded satellite capacity must be at least 3 positions at this capital",
     }
     if all(c.values()):
         tier = "LIVE"

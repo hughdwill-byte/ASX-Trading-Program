@@ -218,6 +218,92 @@ def test_forecast_calibration_is_causal():
     assert "VAS" in fb.mu.index and fb.status == "ok" and np.isfinite(fb.mu_se.drop("VAS")).all()
 
 
+def test_research_pipeline_offline_and_immutable_freeze():
+    """strat-backtest end to end on synthetic data in a temp dir (never results/): continuous walk-forward
+    account, append-only frozen registry (a rerun reuses, never re-freezes), complete neighbour criterion."""
+    import json
+    import tempfile
+    from types import SimpleNamespace
+
+    from ml import strategy_cli as sc
+
+    rng = np.random.default_rng(9)
+    idx = pd.bdate_range("2015-06-01", "2025-03-31")
+    mkt = rng.normal(0.0003, 0.008, len(idx))
+    cols = {f"T{i:02d}": 20 * np.exp(np.cumsum(mkt + rng.normal(0.00005 * (i % 5), 0.013, len(idx)))) for i in range(14)}
+    cols["VAS"] = 50 * np.exp(np.cumsum(mkt))
+    adj = pd.DataFrame(cols, index=idx)
+    cfg = dict(CFG, broker="stake", min_history_days=260)
+    ctx = Context(panel_from(adj, volume=2e6), None, cfg)
+    saved = sc.RESULTS, sc.SETTINGS
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            sc.RESULTS, sc.SETTINGS = pathlib.Path(tmp), [(25000.0, 0.0)]
+            ctx.tfm_dir = pathlib.Path(tmp)
+            assert sc.strat_backtest(ctx, cfg, SimpleNamespace(end=None)) == 0
+            v1 = json.loads((pathlib.Path(tmp) / "validation.json").read_text())["settings"]["25000_core0"]
+            reg1 = json.loads((pathlib.Path(tmp) / "frozen_choice.json").read_text())
+            assert sc.strat_backtest(ctx, cfg, SimpleNamespace(end=None)) == 0
+            v2 = json.loads((pathlib.Path(tmp) / "validation.json").read_text())["settings"]["25000_core0"]
+            reg2 = json.loads((pathlib.Path(tmp) / "frozen_choice.json").read_text())
+            hold = pathlib.Path(tmp) / "holdings.csv"
+            hold.write_text("ticker,shares\nT01,10\nCASH,500\n")
+            today = ctx.dates[-1]
+            sc.strat_recommend(ctx, dict(cfg, capital=25000.0, core_weight=0.0),
+                               SimpleNamespace(capital=None, holdings=str(hold)), today=today)
+            rec = json.loads((pathlib.Path(tmp) / "recommendation.json").read_text())
+            sc.strat_recommend(ctx, dict(cfg, capital=26000.0, core_weight=0.0), SimpleNamespace(capital=None), today=today)
+            rec_other = json.loads((pathlib.Path(tmp) / "recommendation.json").read_text())
+            sc.strat_recommend(ctx, dict(cfg, capital=25000.0, core_weight=0.0), SimpleNamespace(capital=None),
+                               today=today + pd.offsets.BDay(10))
+            rec_stale = json.loads((pathlib.Path(tmp) / "recommendation.json").read_text())
+            vpath = pathlib.Path(tmp) / "validation.json"   # force PAPER to exercise the proposal path
+            vj = json.loads(vpath.read_text())
+            vj["settings"]["25000_core0"]["tier"] = "PAPER"
+            vpath.write_text(json.dumps(vj))
+            last_month_end = ctx.dates[ctx.decision_rows()[-1]]
+            sc.strat_recommend(ctx, dict(cfg, capital=25000.0, core_weight=0.0), SimpleNamespace(capital=None),
+                               today=last_month_end)
+            rec_paper = json.loads((pathlib.Path(tmp) / "recommendation.json").read_text())
+            paper_rows = (pathlib.Path(tmp) / "paper").glob("*.csv")
+            paper_text = "".join(f.read_text() for f in paper_rows)
+        finally:
+            sc.RESULTS, sc.SETTINGS = saved
+    assert len(reg1["experiments"]) == len(reg2["experiments"]) == 1 and reg2["experiments"] == reg1["experiments"]
+    assert v2["frozen"]["reused"] and not v1["frozen"]["reused"] and v1["frozen"]["variant"] == v2["frozen"]["variant"]
+    assert all("passes_a_full" in n for n in v1["neighbours"]) and "hold_out_note" in v1
+    assert v1["wf_select"]["months"] > 0 and v1["capacity"]["funded_n_eff"] >= 3
+    assert rec["execution_orders"] == [] and rec["account"]["cash"] == 500 and rec["setting"] == "25000_core0"
+    assert any("synthetic" in b for b in rec["execution_blockers"]) and rec["data_state"] == "current"
+    assert all(o["status"] == "estimate" for o in rec["paper_proposals"])
+    assert rec_other["setting"] is None and rec_other["tier"] == "FALLBACK" and "not inherited" in rec_other["reasons"][0]
+    assert rec_stale["data_state"] == "stale" and rec_stale["paper_proposals"] == []
+    assert rec_paper["paper_book"]["date"] == str(ctx.dates[-1].date()) and rec_paper["execution_orders"] == []
+    assert str(ctx.dates[-1].date()) in paper_text   # paper NAV dated by its real valuation session
+
+
+def test_f20_asic_retry_and_as_of_join():
+    import tempfile
+    from types import SimpleNamespace
+
+    from ml import data_asic
+
+    class Fake:
+        def get(self, url, timeout):
+            return SimpleNamespace(status_code=404, ok=False, content=b"")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base = pathlib.Path(tmp)
+        data_asic.download(base, "2026-09-01", "2026-10-16", pause=0, session=Fake(), today=pd.Timestamp("2026-10-20"))
+        missing = set((base / "missing.txt").read_text().split())
+    assert "20260901" in missing and "20261016" not in missing          # recent 404 retried next run
+    si = pd.DataFrame({"BHP": [0.02, 0.03]}, index=pd.to_datetime(["2026-01-03", "2026-01-20"]))  # 3 Jan = Saturday
+    sessions = pd.bdate_range("2026-01-02", "2026-01-30")
+    out = data_asic.as_of(si, sessions, max_age_days=10)
+    assert np.isnan(out.loc["2026-01-02", "BHP"]) and out.loc["2026-01-05", "BHP"] == 0.02   # weekend update kept
+    assert np.isnan(out.loc["2026-01-14", "BHP"]) and out.loc["2026-01-20", "BHP"] == 0.03   # stale -> missing
+
+
 if __name__ == "__main__":
     started = time.time()
     for name, fn in list(globals().items()):

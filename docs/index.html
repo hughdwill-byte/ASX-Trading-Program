@@ -634,10 +634,10 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
     $("rec-tier-text").textContent = TIER_TEXT[tier] || tier;
     $("rec-asof").textContent = r.as_of ? `As of ${fmtDate(r.as_of)}` : "";
     $("rec-action").textContent = r.action_text || "";
-    const orders = d.orders_next_open || [];
+    const orders = d.paper_proposals || d.orders_next_open || [];
     $("rec-orders").hidden = !orders.length;
     if (orders.length) {
-      $("rec-orders").replaceChildren(el("table", {}, [
+      $("rec-orders").replaceChildren(el("p", { class: "sub small", text: "Paper proposals: estimates for the hypothetical research book (adjusted prices), not broker orders. No orders are placed by this program." }), el("table", {}, [
         el("thead", {}, el("tr", {}, ["Side", "Stock", "Shares", "Est. price", "Est. cost"].map((h, i) => el("th", { class: i > 1 ? "r" : "", text: h })))),
         el("tbody", {}, orders.map((o) => el("tr", {}, [
           el("td", { text: o.side }), el("td", { class: "mono", text: o.ticker }),

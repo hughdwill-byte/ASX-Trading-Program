@@ -5,7 +5,7 @@ import datetime as dt
 import logging
 import pathlib
 import sys
-from typing import Any, Dict, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 if __package__ is None or __package__ == "":
     # Allow running as a script via ``python ml/train_model.py`` by pushing the project root onto sys.path.

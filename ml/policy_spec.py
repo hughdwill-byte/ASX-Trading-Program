@@ -141,6 +141,7 @@ REGISTRY: Dict[str, tuple] = {
     "cash_rate_annual": ("fraction/yr", ">=0", "assumption", "INACTIVE in legacy engine (cash earns 0); used as r_cash by the optimiser"),
     "core_drift_band": ("fraction", "[0,1]", "owner", "active (legacy core variants, July review)"),
     "asic_lag_days": ("business days", ">=0", "data", "active: SI usable date"),
+    "si_max_age_days": ("calendar days", ">=0", "data", "active: older SI is missing (NaN), not zero"),
     "si_screen": ("bool", "", "strategy", "shadowed: grid variant decides"),
     "si_max": ("fraction", "[0,1]", "strategy", "active for SI variants; missing SI fails the screen"),
     "universe_size": ("count", ">=1", "data", "active: liquid candidate universe (not a holding count)"),

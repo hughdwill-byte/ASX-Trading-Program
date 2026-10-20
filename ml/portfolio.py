@@ -18,6 +18,8 @@ import pandas as pd
 
 from ml.signals import Context
 
+ENGINE_ID = "monthly_v2_repaired_f01_f05"  # bump when engine semantics change: new experiment identities
+
 DEFAULTS = {
     "capital": 10000.0, "core_weight": 0.0, "core_ticker": "VAS.AX", "signal": "RAMOM",
     "n_positions": 5, "buffer_mult": 3, "min_position": 500.0, "min_order": 500.0,
@@ -26,7 +28,7 @@ DEFAULTS = {
     "brokerage": 6.50, "slippage_tiers": {"high": 0.0010, "mid": 0.0025, "low": 0.0050, "etf": 0.0005},
     "slippage_mdv_high": 10e6, "slippage_mdv_mid": 2e6, "cost_stress_mult": 2.0,
     "stale_days": 10, "stale_haircut": 0.30, "cash_rate_annual": 0.0, "core_drift_band": 0.10,
-    "asic_lag_days": 4, "universe_size": 250, "min_history_days": 300, "min_presence": 0.95,
+    "asic_lag_days": 4, "si_max_age_days": 10, "universe_size": 250, "min_history_days": 300, "min_presence": 0.95,
     "min_price": 1.00, "min_mdv60": 2_000_000.0, "max_zero_volume_days": 2, "max_daily_move": 2.0,
     "exclude_tickers": ["STW", "SFY", "A200", "VAS"], "start": "2016-03-31",
     "tax_defer_days": 35, "tax_defer_exit_pct": 0.8, "tax_defer_max_dd": 0.15,
@@ -130,14 +132,17 @@ def funded_capacity(cfg: dict, sat_capital: float, cost_mult: float = 1.0) -> in
 
 
 def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Dict] = None,
-                    end: Optional[str] = None) -> Dict[str, object]:
+                    end: Optional[str] = None, schedule: Optional[List[tuple]] = None) -> Dict[str, object]:
     """Legacy fixed-count control (N5/N8...). Lifecycle per decision row i (last session of the month):
     decide on data up to the close of i -> size an integer order plan at the close of i -> execute at the
     open of row i+1, where a buy is re-sized down (never up) so its debit fits the order budget and the cash
     actually available; no open at i+1 = order rejected, nothing filled. Risk exits (persistent
     ineligibility, regime OFF) run at every monthly decision; rank (alpha) changes only on the rebalance
     cadence. Holdings without a price for `stale_days` stay on the book, marked at last close x (1 - haircut).
-    Prices are split/dividend-adjusted, so share counts are synthetic research quantities, not executable."""
+    Prices are split/dividend-adjusted, so share counts are synthetic research quantities, not executable.
+
+    `schedule` [(from_date, Variant), ...] switches rules inside ONE continuous account (holdings, cash and
+    costs carry over): the investable walk-forward selection (F12). Variants must share capital/core weight."""
     core = cfg["core_ticker"].replace(".AX", "")
     if core not in ctx.A.columns:
         raise ValueError(f"Core ETF {core} missing from the panel; run ingest.")
@@ -160,6 +165,9 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
                           f"A${max(cfg['min_position'], cfg['min_parcel']):,.0f} (< 3)")
         core_target, n_eff = 1.0, 0
     K = v.buffer_mult * max(n_eff, 1)
+    if schedule:
+        schedule = sorted((pd.Timestamp(d), x) for d, x in schedule)
+        assert all(x.capital == v.capital and x.core_weight == v.core_weight for _, x in schedule)
 
     cash = {"core": 0.0, "sat": 0.0}
     shares: Dict[str, int] = {}          # satellite stocks
@@ -223,6 +231,12 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
         if j >= len(ctx.dates) or ctx.dates[j] > end_ts:
             break  # execution would fall after the requested end: the decision stays pending
         px_i = A_last.iloc[i]
+        if schedule:
+            live = [x for d, x in schedule if d <= ctx.dates[j]]
+            if live and live[-1] != v:
+                v = live[-1]
+                n_eff = 0 if skipped_reason else min(v.n, funded_capacity(cfg, sat0, v.slip_mult))
+                K = v.buffer_mult * max(n_eff, 1)
         if k == 0:  # inception
             cash["core"] = core_target * v.capital
             cash["sat"] = v.capital - cash["core"]

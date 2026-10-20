@@ -37,7 +37,11 @@ class Context:
         self.cfg = cfg
         self.aord = aord.reindex(self.dates, method="ffill") if aord is not None else None
         self.tfm_dir = tfm_dir
-        self.asic = asic.reindex(self.dates).ffill() if asic is not None else None  # usable SI per date
+        if asic is not None:   # usable SI per session (as-of join; stale -> NaN, never 0)
+            from ml.data_asic import as_of
+
+            asic = as_of(asic, self.dates, cfg.get("si_max_age_days", 10))
+        self.asic = asic
         self._tfm_cache: Dict[str, Dict[pd.Timestamp, pd.Series]] = {}
         self._build()
 

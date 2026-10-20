@@ -417,7 +417,6 @@ def _augment_with_recommendations(
     reco_count = symbols.map(lambda s: stats.get(s, {}).get("reco_count", 0.0)).astype(float)
     reco_avg_prob = symbols.map(lambda s: stats.get(s, {}).get("reco_avg_prob", np.nan)).astype(float)
     reco_last_prob = symbols.map(lambda s: stats.get(s, {}).get("reco_last_prob", np.nan)).astype(float)
-    last_dates = symbols.map(lambda s: stats.get(s, {}).get("reco_last_date"))
     days_since = []
     for sym, dt_val in zip(symbols, dates):
         last_date = stats.get(sym, {}).get("reco_last_date")
