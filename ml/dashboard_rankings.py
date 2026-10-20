@@ -161,6 +161,10 @@ def historical_ranking(methods: List[dict], bench: dict, basis: str = "pre_tax")
     out = {"basis": basis, "common_interval": {"start": dates[0] if dates else None, "end": dates[-1] if dates else None,
                                                "months": len(dates)},
            "initial_nav": capital, "rows": [], "not_ranked": [], "short_coverage": [], "incompatible": []}
+    if bench.get("status", "ok") != "ok":
+        out["state"] = "unavailable"
+        out["reason"] = f"VAS benchmark account not funded in this scenario: {bench.get('reason')}"
+        return out
     bench_vals, why = _series_values(bench, dates, key)
     if bench_vals is None:
         out["state"] = "unavailable"
