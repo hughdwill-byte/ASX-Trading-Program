@@ -209,8 +209,9 @@ def pick(
         expected = fc["med"][:, h] / fc["last"] - 1
         low = fc["q10"][:, h] / fc["last"] - 1
         high = fc["q90"][:, h] / fc["last"] - 1
-        # sharpe: reward per unit of forecast uncertainty, so volatile penny stocks don't dominate.
-        score = expected / np.maximum(high - low, 1e-6) if args.rank == "sharpe" else expected
+        # interval-normalised forecast score: median forecast return / (q90 - q10) width. NOT a Sharpe ratio
+        # ("sharpe" is kept as a deprecated CLI alias); it stops volatile penny stocks dominating.
+        score = expected / np.maximum(high - low, 1e-6) if args.rank in ("interval", "sharpe") else expected
 
     order = np.argsort(-np.nan_to_num(score, nan=-np.inf))
     picks = [
@@ -248,17 +249,23 @@ def run_backtest(
     started = time.monotonic()
 
     # Anchored to absolute row numbers (not the start date) so a rolling window reuses cached forecasts.
-    rebalances = [i for i in positions if i % hold == 0 and i + hold < len(idx)]
+    # The requested end is a hard boundary: a period that would exit after it is closed out (marked, not sold)
+    # at the last session <= end and flagged open.
+    last = int(positions[-1]) if len(positions) else -1
+    rebalances = [i for i in positions if i % hold == 0 and i + 1 <= last]
     for n, i in enumerate(rebalances, start=1):
         if equity <= 0:
             logger.warning("Equity exhausted; stopping backtest.")
             break
-        signal_date, exit_date = idx[i], idx[i + hold]  # entry is the open of idx[i + 1]
-        picks, universe = pick(i, panel, eligible, args, forecaster, cache_dir, 2 * slip)
-        entry_px = panel["adj_open"].iloc[i + 1]
-        exit_px = panel["adj_close"].iloc[i + 1 : i + hold + 1].ffill().iloc[-1]
-
+        exit_row = min(i + hold, last)
+        is_open = exit_row < i + hold
+        signal_date, exit_date = idx[i], idx[exit_row]  # entry is the open of idx[i + 1]
         alloc = equity / args.top
+        # economic edge covers slippage on both legs AND the two fixed brokerage charges on this allocation
+        picks, universe = pick(i, panel, eligible, args, forecaster, cache_dir, 2 * slip + 2 * trade_cost / max(alloc, 1e-9))
+        entry_px = panel["adj_open"].iloc[i + 1]
+        exit_px = panel["adj_close"].iloc[i + 1 : exit_row + 1].ffill().iloc[-1]
+
         pnl = 0.0
         for p in picks:
             r = exit_px[p["symbol"]] / entry_px[p["symbol"]] - 1
@@ -268,7 +275,7 @@ def run_backtest(
             trade_pnl = alloc * net - 2 * trade_cost
             pnl += trade_pnl
             trades.append({"signal_date": signal_date, "exit_date": exit_date, **p,
-                           "return": float(r), "pnl": float(trade_pnl)})
+                           "return": float(r), "pnl": float(trade_pnl), "open": is_open})
         period_return = pnl / equity if equity > 0 else 0.0
         equity += pnl
 
@@ -280,7 +287,7 @@ def run_backtest(
             bench_ret = float(b.iloc[1] / b.iloc[0] - 1)
             bench_equity *= 1 + (bench_ret if np.isfinite(bench_ret) else 0.0)
 
-        periods.append({"signal_date": signal_date, "exit_date": exit_date, "picks": len(picks),
+        periods.append({"signal_date": signal_date, "exit_date": exit_date, "open": is_open, "picks": len(picks),
                         "universe": len(universe), "return": period_return,
                         "universe_return": universe_ret, "benchmark_return": bench_ret,
                         "equity": equity})
@@ -327,8 +334,9 @@ def add_cli_args(parser) -> None:
     parser.add_argument("--hold", type=int, default=5, help=f"Sessions per holding period, 1-{HORIZON} (default 5).")
     parser.add_argument("--signal", choices=["timesfm", "momentum"], default="timesfm",
                         help="Ranking signal; momentum is a cheap baseline to check TimesFM adds value.")
-    parser.add_argument("--rank", choices=["sharpe", "return"], default="sharpe",
-                        help="Rank by forecast return / forecast spread (sharpe) or raw forecast return.")
+    parser.add_argument("--rank", choices=["interval", "sharpe", "return"], default="interval",
+                        help="Rank by forecast return / (q90 - q10) interval width (interval; 'sharpe' is a deprecated "
+                             "alias - it is not a Sharpe ratio) or raw forecast return.")
     parser.add_argument("--context", type=int, default=512, help="TimesFM context length in sessions (default 512).")
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT,
                         help="Hugging Face repo id or local folder containing model.safetensors.")
@@ -497,17 +505,21 @@ def publish(panel, eligible, args, forecaster, cache_dir, config, load_seconds: 
 
 
 def _print_recommendations(panel, eligible, args, forecaster, cache_dir, config) -> int:
+    from ml.portfolio import affordable_qty
+
     i = len(panel["adj_close"].index) - 1
-    picks, universe = pick(i, panel, eligible, args, forecaster, cache_dir, 2 * config.backtest.slippage_bps / 10_000)
     capital = args.capital or config.backtest.initial_capital
-    budget = capital * (1 - config.risk.min_cash_buffer) / args.top
+    budget = capital / args.top   # same allocation rule as run_backtest (no extra cash buffer)
+    slip = config.backtest.slippage_bps / 10_000
+    picks, universe = pick(i, panel, eligible, args, forecaster, cache_dir,
+                           2 * slip + 2 * config.backtest.trade_cost / max(budget, 1e-9))
     print(f"\nTimesFM picks for next open after {panel['adj_close'].index[i]:%Y-%m-%d} "
           f"(hold {args.hold} sessions, {len(universe)} eligible)")
     print(f"{'Symbol':<8} {'Price':>8} {'Fcst%':>7} {'Q10%':>7} {'Q90%':>7} {'Score':>7} {'Qty':>6} {'Spend':>9}")
     print("-" * 66)
     for p in picks:
         price = float(panel["close"].iloc[i][p["symbol"]])
-        qty = math.floor(budget / price) if price > 0 else 0
+        qty = affordable_qty(price, slip, budget, lambda value: config.backtest.trade_cost)   # integer, fees included
         print(f"{p['symbol']:<8} {price:>8.3f} {100 * p['expected']:>+7.2f} {100 * p['q10']:>+7.2f} "
               f"{100 * p['q90']:>+7.2f} {p['score']:>7.3f} {qty:>6} {qty * price:>9.2f}")
     if not picks:

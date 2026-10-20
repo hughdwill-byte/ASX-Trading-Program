@@ -165,8 +165,8 @@ def strat_explain_config(cfg: dict, orchestrator) -> int:
     if path and pathlib.Path(path).exists() and str(path).endswith((".yaml", ".yml")):
         raw = (yaml.safe_load(pathlib.Path(path).read_text()) or {}).get("strategy") or {}
     frozen_path = RESULTS / "frozen_choice.json"
-    frozen = json.loads(frozen_path.read_text()) if frozen_path.exists() else {}
-    report = explain_config(DEFAULTS, raw, frozen.get("settings", frozen))
+    latest = {e["setting"]: e for e in val._registry(frozen_path)["experiments"]} if frozen_path.exists() else {}
+    report = explain_config(DEFAULTS, raw, latest)
     for r in report["rows"]:
         print(f"{r['key']:<22} {str(r['value'])[:28]:<28} {r['origin']:<11} {r['units']:<14} {r['status']:<12} {r['note']}")
     for f in report["frozen"]:
@@ -291,7 +291,9 @@ def tfm_cache(ctx: Context, cfg: dict, args) -> int:
                 logger.warning("Projection over 300 min: restricting TFM forecasts to the top 150 by MDV60.")
         logger.info("tfm-cache %s %d/%d %s (%d series) %.0fs elapsed", args.transform, n, len(todo),
                     ctx.dates[i].date(), len(df), time.monotonic() - started)
-    (out_dir / f"{args.transform}_meta.json").write_text(json.dumps({"universe_limit": limit, "horizon": args.horizon}))
+    (out_dir / f"{args.transform}_meta.json").write_text(json.dumps({
+        "universe_limit": limit, "horizon": args.horizon, "checkpoint": args.checkpoint, "context": 512,
+        "transform": args.transform, "calendar_id": ctx.calendar_id, "score": "median/(q90-q10) at horizon"}))
     return 0
 
 
@@ -335,7 +337,12 @@ def strat_backtest(ctx: Context, cfg: dict, args) -> int:
     tfm_ok = {}
     for sig, tr in (("TFM_REL", "rel"), ("TFM_RAW", "raw")):
         have = sum((ctx.tfm_dir / f"{tr}_{ctx.dates[i]:%Y-%m-%d}.csv").exists() for i in rows_needed)
-        tfm_ok[sig] = have >= len(rows_needed) - 1  # the latest month-end may not be cached yet
+        meta_path = ctx.tfm_dir / f"{tr}_meta.json"
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        compatible = meta.get("horizon") == 21   # manifest must match the monthly engine's horizon before reuse
+        tfm_ok[sig] = compatible and have >= len(rows_needed) - 1  # the latest month-end may not be cached yet
+        if have and not compatible:
+            logger.warning("%s cache manifest missing or horizon != 21 (%s); skipping TFM variants.", sig, meta)
         if 0 < have < len(rows_needed) - 1:
             logger.warning("%s cache covers %d/%d decision dates; skipping TFM variants.", sig, have, len(rows_needed))
     si_ok = ctx.asic is not None and bool(getattr(ctx, "asic_coverage", {}).get("complete"))
@@ -410,11 +417,27 @@ def strat_backtest(ctx: Context, cfg: dict, args) -> int:
                     if row["period"] == "walk_forward"]
 
     _write_compare(compare)
+    _universe_snapshot(ctx)
     _write_history(per_setting, aord_m, ew_m, cfg.get("tax_rate", 0.0))
     (RESULTS / "validation.json").write_text(json.dumps(sanitize_for_json(validation), indent=1))
     logger.info("strat-backtest finished in %.1f min", (time.time() - run_start) / 60)
     _print_summary(compare, validation, cfg)
     return 0
+
+
+def _universe_snapshot(ctx: Context) -> None:
+    """Dated record of today's eligible universe (F18). Past universes cannot be rebuilt from current listings;
+    these snapshots accumulate forward. Tickers with no price in the last 10 sessions are listed separately
+    (download failure or delisting: not distinguished without an exchange log)."""
+    i = len(ctx.dates) - 1
+    names = ctx.eligible(i)
+    out = RESULTS / "universe" / f"eligible_{ctx.dates[i]:%Y-%m-%d}.csv"
+    if out.exists():
+        return
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"ticker": names, "mdv60": [float(ctx.MDV60.iloc[i][t]) for t in names]}).to_csv(out, index=False)
+    gone = [t for t in ctx.A.columns if ctx.age.iloc[i][t] >= 10 and ctx.age.iloc[i][t] < 260]
+    (out.parent / f"unpriced_{ctx.dates[i]:%Y-%m-%d}.txt").write_text("\n".join(sorted(gone)))
 
 
 def config_identity(cfg: dict) -> str:
@@ -765,7 +788,8 @@ def strat_publish(cfg: dict, results_dir: pathlib.Path = RESULTS, out: Optional[
         "history": json.loads((RESULTS / "history.json").read_text()) if (RESULTS / "history.json").exists() else None,
         "data_flags": {
             "asic_stale": not bool((validation.get("asic_coverage") or {}).get("complete")),
-            "survivorship_note": "Backtests use today's listings only; delisted companies are missing, so results are biased upward.",
+            "survivorship_note": "Backtests use today's listings only; delisted companies are missing, so results are biased "
+                                 "upward. The 1.5-point hurdle in test (b) is a sensitivity, not a survivorship correction.",
             "tfm_cache_date": cache_files[-1].stem.split("_")[-1] if cache_files else None,
         },
     })

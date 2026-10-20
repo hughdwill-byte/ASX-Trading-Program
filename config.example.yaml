@@ -24,7 +24,7 @@ strategy:                    # monthly cost-aware strategy (strat-* commands); s
   signal: RAMOM              # default signal for reference; the live variant comes from results/frozen_choice.json
   n_positions: 5             # satellite slots (capped by capital / min_position)
   buffer_mult: 3             # keep a holding until its rank falls below buffer_mult x N
-  min_position: 500          # smallest position; fewer than 3 slots disables the satellite
+  min_position: 500          # smallest position; fewer than 3 fee-aware funded slots disables the satellite
   min_order: 500             # skip any order smaller than this
   regime_filter: true        # move the satellite to the core ETF when ^AORD is below its 200-day average
   regime_band: 0.02          # +/- band around the 200-day average before the regime flips
@@ -32,6 +32,7 @@ strategy:                    # monthly cost-aware strategy (strat-* commands); s
   si_screen: false           # skip names with ASIC short interest above si_max
   si_max: 0.05               # 5% of shares on issue reported short
   asic_lag_days: 4           # business days before an ASIC report is treated as known
+  si_max_age_days: 10        # older short interest counts as missing (an enabled SI screen then rejects the name)
   broker: stake              # flat (brokerage below) | stake ($3/order) | cmc (free buys <= $1,000) - fees unverified, check broker sites
   min_parcel: 500            # ASX minimum marketable parcel; no buy below this
   brokerage: 6.50            # $ per order for broker: flat
@@ -42,9 +43,9 @@ strategy:                    # monthly cost-aware strategy (strat-* commands); s
   tax_defer_exit_pct: 0.8    # ...unless the name ranks in the bottom 20%
   tax_defer_max_dd: 0.15     # ...or has fallen more than 15% from its entry price
   cost_stress_mult: 2.0      # slippage multiplier for the cost-stress test
-  stale_days: 10             # exit a holding with no price for this many trading days
-  stale_haircut: 0.30        # exit stale holdings at last close x (1 - haircut)
-  cash_rate_annual: 0.0      # interest on idle cash (not modelled)
+  stale_days: 10             # a holding with no price for this many sessions is frozen (kept, not sold)
+  stale_haircut: 0.30        # frozen holdings are VALUED at last close x (1 - haircut); no cash is created
+  cash_rate_annual: 0.0      # INACTIVE in the legacy engine (cash earns 0); the research optimiser uses it as r_cash
   core_drift_band: 0.10      # rebalance core vs satellite each July only beyond this drift
   universe_size: 250         # top N by 60-day median dollar turnover
   min_history_days: 300      # valid price days required
@@ -56,3 +57,6 @@ strategy:                    # monthly cost-aware strategy (strat-* commands); s
   exclude_tickers: [STW, SFY, A200, VAS]  # always excluded; other ETFs/funds are found via Yahoo (results/instrument_types.json)
   tax_rate: 0.32             # marginal rate for the after-tax estimate (30% bracket + 2% Medicare levy)
   start: "2016-03-31"        # first decision date
+  # session_calendar: data/asx_sessions.csv   # optional versioned ASX session list (column: date); default is causal
+  # holdings_file: my_holdings.csv            # optional actual holdings/cash (ticker,shares + CASH row) for strat-recommend
+  # Run `python stocktrade.py strat-explain-config` to see which of these are active, shadowed or inactive.

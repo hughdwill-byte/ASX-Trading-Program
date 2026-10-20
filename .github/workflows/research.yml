@@ -12,6 +12,8 @@ on:
       - "ml/validation.py"
       - "ml/strategy_cli.py"
       - "ml/data_asic.py"
+      - "ml/optimizer.py"
+      - "ml/policies.py"
       - ".github/workflows/research.yml"
 
 permissions:
@@ -46,7 +48,12 @@ jobs:
           key: research-${{ github.run_id }}
           restore-keys: research-
       - name: Self-check
-        run: python ml/test_strategy_v2.py
+        run: |
+          python ml/test_strategy_v2.py
+          python ml/test_engine_repairs.py
+          python ml/test_optimizer.py
+          python ml/test_accounting.py
+          python ml/test_policies.py
       - name: Download ASX prices
         run: time python stocktrade.py --log-level WARNING ingest
       - name: Download ASIC short-position history (optional)
