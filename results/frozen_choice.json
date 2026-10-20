@@ -1,50 +1,154 @@
 {
-  "2000_core0": {
-    "variant": "RAMOM_N5_noreg_B1_TAX",
-    "config_hash": "8dcf82556681",
-    "timestamp": 1792473316.9452379,
-    "selected_using_data_before": "2024-07-01"
-  },
-  "5000_core0": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "6c6f1bda89e3",
-    "timestamp": 1792473318.0779727,
-    "selected_using_data_before": "2024-07-01"
-  },
-  "5000_core0.7": {
-    "variant": "RAMOM_N8_noreg_B3",
-    "config_hash": "401ef35c49f7",
-    "timestamp": 1792473319.1930985,
-    "selected_using_data_before": "2024-07-01"
-  },
-  "10000_core0": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "144dc50b23e7",
-    "timestamp": 1792473320.063423,
-    "selected_using_data_before": "2024-07-01"
-  },
-  "10000_core0.6": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "fac7cacb4435",
-    "timestamp": 1792473321.1767335,
-    "selected_using_data_before": "2024-07-01"
-  },
-  "25000_core0": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "ac77d228c004",
-    "timestamp": 1792473322.306718,
-    "selected_using_data_before": "2024-07-01"
-  },
-  "50000_core0": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "841e86eb9cda",
-    "timestamp": 1792473323.4265783,
-    "selected_using_data_before": "2024-07-01"
-  },
-  "50000_core0.6": {
-    "variant": "RAMOM_N5_noreg_B1",
-    "config_hash": "b26c23b03cbe",
-    "timestamp": 1792473324.5327544,
-    "selected_using_data_before": "2024-07-01"
-  }
+  "schema": "frozen_registry_v1",
+  "experiments": [
+    {
+      "setting": "2000_core0",
+      "variant": "RAMOM_N5_noreg_B1_TAX",
+      "config_hash": "8dcf82556681",
+      "timestamp": 1792473316.9452379,
+      "selected_using_data_before": "2024-07-01",
+      "experiment_id": "legacy-8dcf82556681",
+      "legacy": true
+    },
+    {
+      "setting": "5000_core0",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "6c6f1bda89e3",
+      "timestamp": 1792473318.0779727,
+      "selected_using_data_before": "2024-07-01",
+      "experiment_id": "legacy-6c6f1bda89e3",
+      "legacy": true
+    },
+    {
+      "setting": "5000_core0.7",
+      "variant": "RAMOM_N8_noreg_B3",
+      "config_hash": "401ef35c49f7",
+      "timestamp": 1792473319.1930985,
+      "selected_using_data_before": "2024-07-01",
+      "experiment_id": "legacy-401ef35c49f7",
+      "legacy": true
+    },
+    {
+      "setting": "10000_core0",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "144dc50b23e7",
+      "timestamp": 1792473320.063423,
+      "selected_using_data_before": "2024-07-01",
+      "experiment_id": "legacy-144dc50b23e7",
+      "legacy": true
+    },
+    {
+      "setting": "10000_core0.6",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "fac7cacb4435",
+      "timestamp": 1792473321.1767335,
+      "selected_using_data_before": "2024-07-01",
+      "experiment_id": "legacy-fac7cacb4435",
+      "legacy": true
+    },
+    {
+      "setting": "25000_core0",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "ac77d228c004",
+      "timestamp": 1792473322.306718,
+      "selected_using_data_before": "2024-07-01",
+      "experiment_id": "legacy-ac77d228c004",
+      "legacy": true
+    },
+    {
+      "setting": "50000_core0",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "841e86eb9cda",
+      "timestamp": 1792473323.4265783,
+      "selected_using_data_before": "2024-07-01",
+      "experiment_id": "legacy-841e86eb9cda",
+      "legacy": true
+    },
+    {
+      "setting": "50000_core0.6",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "b26c23b03cbe",
+      "timestamp": 1792473324.5327544,
+      "selected_using_data_before": "2024-07-01",
+      "experiment_id": "legacy-b26c23b03cbe",
+      "legacy": true
+    },
+    {
+      "setting": "2000_core0",
+      "experiment_id": "59b8279bfa16",
+      "variant": "RAMOM_N8_noreg_B3_TAX",
+      "config_hash": "dfc09616710b",
+      "timestamp": 1792475899.324331,
+      "selected_using_data_before": "2024-07-01",
+      "candidates": 33,
+      "prospective_from": "2026-10-20",
+      "hold_out_note": "July 2024 onwards was already examined before these repairs: for any new change it is historical diagnostic evidence, not an untouched hold-out. Only data after an experiment's freeze time is prospective."
+    },
+    {
+      "setting": "5000_core0",
+      "experiment_id": "330c2c3603e0",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "430638861ae0",
+      "timestamp": 1792475900.3811855,
+      "selected_using_data_before": "2024-07-01",
+      "candidates": 33,
+      "prospective_from": "2026-10-20",
+      "hold_out_note": "July 2024 onwards was already examined before these repairs: for any new change it is historical diagnostic evidence, not an untouched hold-out. Only data after an experiment's freeze time is prospective."
+    },
+    {
+      "setting": "10000_core0",
+      "experiment_id": "6671add9fc4b",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "e9f3dd38a742",
+      "timestamp": 1792475901.6359847,
+      "selected_using_data_before": "2024-07-01",
+      "candidates": 33,
+      "prospective_from": "2026-10-20",
+      "hold_out_note": "July 2024 onwards was already examined before these repairs: for any new change it is historical diagnostic evidence, not an untouched hold-out. Only data after an experiment's freeze time is prospective."
+    },
+    {
+      "setting": "10000_core0.6",
+      "experiment_id": "d631e2af8ff9",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "306ee0a577b4",
+      "timestamp": 1792475902.888079,
+      "selected_using_data_before": "2024-07-01",
+      "candidates": 33,
+      "prospective_from": "2026-10-20",
+      "hold_out_note": "July 2024 onwards was already examined before these repairs: for any new change it is historical diagnostic evidence, not an untouched hold-out. Only data after an experiment's freeze time is prospective."
+    },
+    {
+      "setting": "25000_core0",
+      "experiment_id": "351ccdc36e8d",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "ec95b82bb13c",
+      "timestamp": 1792475904.134269,
+      "selected_using_data_before": "2024-07-01",
+      "candidates": 33,
+      "prospective_from": "2026-10-20",
+      "hold_out_note": "July 2024 onwards was already examined before these repairs: for any new change it is historical diagnostic evidence, not an untouched hold-out. Only data after an experiment's freeze time is prospective."
+    },
+    {
+      "setting": "50000_core0",
+      "experiment_id": "0bd0dc4502e8",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "ee64da278553",
+      "timestamp": 1792475905.4062881,
+      "selected_using_data_before": "2024-07-01",
+      "candidates": 33,
+      "prospective_from": "2026-10-20",
+      "hold_out_note": "July 2024 onwards was already examined before these repairs: for any new change it is historical diagnostic evidence, not an untouched hold-out. Only data after an experiment's freeze time is prospective."
+    },
+    {
+      "setting": "50000_core0.6",
+      "experiment_id": "487994a243ce",
+      "variant": "RAMOM_N5_noreg_B1",
+      "config_hash": "a54a95746b9e",
+      "timestamp": 1792475906.6756825,
+      "selected_using_data_before": "2024-07-01",
+      "candidates": 33,
+      "prospective_from": "2026-10-20",
+      "hold_out_note": "July 2024 onwards was already examined before these repairs: for any new change it is historical diagnostic evidence, not an untouched hold-out. Only data after an experiment's freeze time is prospective."
+    }
+  ]
 }
