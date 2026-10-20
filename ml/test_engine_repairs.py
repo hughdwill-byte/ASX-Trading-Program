@@ -12,7 +12,9 @@ import pandas as pd
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from ml.portfolio import DEFAULTS, Variant, affordable_qty, brokerage_fee, funded_capacity, run_backtest_v2  # noqa: E402
+from ml.forecasts import calibrate  # noqa: E402
+from ml.portfolio import (DEFAULTS, Variant, affordable_qty, after_tax_monthly, brokerage_fee,  # noqa: E402
+                          funded_capacity, run_backtest_v2)
 from ml.signals import Context  # noqa: E402
 
 CFG = dict(DEFAULTS, min_mdv60=0.0, exclude_tickers=[], min_history_days=1, min_presence=0.0)
@@ -186,6 +188,34 @@ def test_f05_valuation_through_latest_session():
     rc = {("RAMOM", i): ranks_series(names) for i in ctx.decision_rows(cfg_end["start"])}
     r2 = run_backtest_v2(ctx, Variant(n=3, regime=False, capital=9000), cfg_end, rc, end="2016-12-31")
     assert r2["orders"]["date"].max() <= pd.Timestamp("2016-12-31") and r2["equity"].index[-1] <= pd.Timestamp("2016-12-31")
+
+
+def test_f25_tax_not_pulled_forward():
+    months = pd.date_range("2021-01-31", "2022-03-31", freq="ME")
+    d = pd.Timestamp
+    orders = pd.DataFrame([{"date": d("2021-02-01"), "ticker": "X", "side": "BUY", "shares": 100, "price": 10.0, "brokerage": 3.0},
+                           {"date": d("2021-12-01"), "ticker": "X", "side": "SELL", "shares": 100, "price": 15.0, "brokerage": 3.0}])
+    res = {"monthly": pd.Series(0.01, index=months), "orders": orders, "equity": pd.Series(1e5, index=months)}
+    out = after_tax_monthly(res, 0.32)
+    assert np.allclose(out.values, 0.01)                         # FY22 tax is due 31 Oct 2022, after the data
+    assert abs(out.attrs["unpaid_tax"]["FY2022"] - 0.32 * (500 - 3 - 3)) < 1e-9   # brokerage in the cost base
+
+
+def test_forecast_calibration_is_causal():
+    rng = np.random.default_rng(5)
+    idx = pd.bdate_range("2014-01-01", periods=900)
+    adj = pd.DataFrame({f"T{i:02d}": 10 * np.exp(np.cumsum(rng.normal(0.0002 * i, 0.01, 900))) for i in range(15)}, index=idx)
+    adj["VAS"] = 50 * np.exp(np.cumsum(rng.normal(0.0002, 0.006, 900)))
+    cfg = dict(CFG, min_history_days=260)
+    ctx = Context(panel_from(adj), None, cfg)
+    i = ctx.decision_rows()[-6]
+    fb = calibrate(ctx, "RAMOM", i, min_dates=3)
+    assert fb.label_cutoff <= ctx.dates[i] and fb.trained_until < ctx.dates[i]
+    later = adj.copy()
+    later.loc[later.index > ctx.dates[i]] *= rng.uniform(0.5, 1.5, later.loc[later.index > ctx.dates[i]].shape)
+    fb2 = calibrate(Context(panel_from(later), None, cfg), "RAMOM", i, min_dates=3)
+    assert fb.mu.round(12).equals(fb2.mu.round(12)) and fb.identity() == fb2.identity()
+    assert "VAS" in fb.mu.index and fb.status == "ok" and np.isfinite(fb.mu_se.drop("VAS")).all()
 
 
 if __name__ == "__main__":

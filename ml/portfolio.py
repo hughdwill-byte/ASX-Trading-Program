@@ -370,11 +370,15 @@ def after_tax_monthly(res: Dict[str, object], rate: float) -> pd.Series:
 
     FIFO lots per ticker; capital losses (current and carried forward) offset non-discount gains first;
     the 50% discount applies to what remains of gains on lots held over 12 months. Each financial
-    year's tax is paid at the first month-end on or after 31 October following it (or the last month
-    if the data ends first), as a fraction of equity so later returns compound on the smaller balance.
-    ponytail: ignores dividend tax and franking (adjusted prices fold dividends into gains), brokerage
-    in the cost base and personal circumstances; a rough guide, not tax advice.
+    year's tax is paid at the first month-end on or after 31 October following it, as a fraction of equity so
+    later returns compound on the smaller balance. A payment due after the data ends is NOT pulled into the
+    last month; it is reported in `.attrs["unpaid_tax"]` instead. Brokerage is in the cost base / reduces
+    proceeds when orders carry it. Discount eligibility uses the calendar rule in `accounting.discount_eligible`.
+    ESTIMATED OVERLAY: ignores dividend tax and franking (adjusted prices fold dividends into gains), the
+    account's tax status and personal circumstances; not tax advice and not a cash re-simulation.
     """
+    from ml.accounting import discount_eligible
+
     monthly: pd.Series = res["monthly"]
     orders: pd.DataFrame = res["orders"]
     if not rate or orders.empty or monthly.empty:
@@ -382,24 +386,26 @@ def after_tax_monthly(res: Dict[str, object], rate: float) -> pd.Series:
     lots: Dict[str, deque] = defaultdict(deque)
     fy_parts: Dict[int, List[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])  # short gain, long gain, loss
     for o in orders.sort_values("date", kind="stable").itertuples(index=False):
+        fee = float(getattr(o, "brokerage", 0.0) or 0.0) / int(o.shares)  # per share
         if o.side == "BUY":
-            lots[o.ticker].append([int(o.shares), float(o.price), o.date])
+            lots[o.ticker].append([int(o.shares), float(o.price) + fee, o.date])
             continue
         qty, fy = int(o.shares), o.date.year + (o.date.month >= 7)
         while qty > 0 and lots[o.ticker]:
             lot = lots[o.ticker][0]
             q = min(qty, lot[0])
-            gain = q * (float(o.price) - lot[1])
+            gain = q * (float(o.price) - fee - lot[1])
             if gain < 0:
                 fy_parts[fy][2] -= gain
             else:
-                fy_parts[fy][1 if (o.date - lot[2]).days > 365 else 0] += gain
+                fy_parts[fy][1 if discount_eligible(lot[2], o.date) else 0] += gain
             lot[0] -= q
             qty -= q
             if not lot[0]:
                 lots[o.ticker].popleft()
     frac = pd.Series(0.0, index=monthly.index)
     carry = 0.0
+    unpaid = {}
     for fy in sorted(fy_parts):
         short, long_, loss = fy_parts[fy]
         loss += carry
@@ -411,9 +417,14 @@ def after_tax_monthly(res: Dict[str, object], rate: float) -> pd.Series:
         if tax <= 0:
             continue
         due = monthly.index[monthly.index >= pd.Timestamp(fy, 10, 31)]
-        when = due[0] if len(due) else monthly.index[-1]
+        if not len(due):
+            unpaid[f"FY{fy}"] = tax  # falls due after the data ends
+            continue
+        when = due[0]
         frac[when] = 1 - (1 - frac[when]) * (1 - tax / float(res["equity"].loc[when]))
-    return (1 + monthly) * (1 - frac) - 1
+    out = (1 + monthly) * (1 - frac) - 1
+    out.attrs["unpaid_tax"] = unpaid
+    return out
 
 
 def ew_universe(ctx: Context, cfg: dict, end: Optional[str] = None) -> pd.Series:
