@@ -755,7 +755,7 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
   }
 
   // ---------- historical replay ----------
-  const SIGNAL_NAMES = { RAMOM: "Risk-adjusted momentum", COMBO: "Momentum + low-vol blend", LOWVOL: "Low volatility",
+  const SIGNAL_NAMES = { RAMOM: "Risk-adjusted momentum", RESMOM: "Residual momentum", COMBO: "Momentum + low-vol blend", LOWVOL: "Low volatility",
     TFM_REL: "TimesFM (vs index)", TFM_RAW: "TimesFM (price)" };
   function strategyLabel(id) {
     const m = /^([A-Z_]+?)_N(\d+)_(reg|noreg)_B(\d+)(_SI)?(_Q)?(_TAX)?/.exec(id || "");

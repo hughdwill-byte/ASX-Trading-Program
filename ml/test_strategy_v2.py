@@ -69,9 +69,29 @@ def test_no_lookahead():
         altered[k].loc[altered[k].index > t] *= rng.uniform(0.5, 1.5, altered[k].loc[altered[k].index > t].shape)
     ctx2 = Context(altered, aord.where(aord.index <= t, aord * 3), CFG)
     assert ctx.ranks("RAMOM", i).equals(ctx2.ranks("RAMOM", i))
+    assert ctx.RESMOM.iloc[i].equals(ctx2.RESMOM.iloc[i])
     alt = run_backtest_v2(ctx2, Variant(n=4, regime=False), CFG)
     key = lambda o: o.loc[o["date"] <= ctx.dates[i + 1], ["date", "ticker", "side"]].reset_index(drop=True)
     assert key(base["orders"]).equals(key(alt["orders"]))
+
+
+def test_resmom_market_neutral():
+    rng = np.random.default_rng(3)
+    days = 3000
+    idx = pd.bdate_range("2005-01-01", periods=days)
+    mkt = rng.normal(0.0003, 0.01, days)
+    cols = {f"T{i:02d}": 10 * np.exp(np.cumsum(1.5 * mkt + rng.normal(0, 0.012, days))) for i in range(6)}
+    cols["VAS"] = 50 * np.exp(np.cumsum(mkt))
+    ctx = Context(panel_from(pd.DataFrame(cols, index=idx)), None, dict(CFG, min_history_days=1, min_presence=0.0))
+    lm = np.log(ctx.A["VAS"])
+    trailing = (lm.shift(21) - lm.shift(252))  # market's own 12-1 return over the same window
+    # windows overlap heavily, so single-stock correlations are noisy; the average over stocks is not
+    res, raw = [], []
+    for t in (f"T{i:02d}" for i in range(6)):
+        both = pd.concat([ctx.RESMOM[t], ctx.RAMOM[t], trailing], axis=1).dropna()
+        res.append(both.iloc[:, 0].corr(both.iloc[:, 2]))
+        raw.append(both.iloc[:, 1].corr(both.iloc[:, 2]))
+    assert abs(np.mean(res)) < 0.1 and np.mean(raw) > 0.5
 
 
 def flat_ctx(days=320, n=10, mdv_high=None):
