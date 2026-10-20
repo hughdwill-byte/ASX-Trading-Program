@@ -18,6 +18,8 @@ import pandas as pd
 
 from ml.signals import Context
 
+ENGINE_ID = "monthly_v2_repaired_f01_f05"  # bump when engine semantics change: new experiment identities
+
 DEFAULTS = {
     "capital": 10000.0, "core_weight": 0.0, "core_ticker": "VAS.AX", "signal": "RAMOM",
     "n_positions": 5, "buffer_mult": 3, "min_position": 500.0, "min_order": 500.0,
@@ -26,7 +28,7 @@ DEFAULTS = {
     "brokerage": 6.50, "slippage_tiers": {"high": 0.0010, "mid": 0.0025, "low": 0.0050, "etf": 0.0005},
     "slippage_mdv_high": 10e6, "slippage_mdv_mid": 2e6, "cost_stress_mult": 2.0,
     "stale_days": 10, "stale_haircut": 0.30, "cash_rate_annual": 0.0, "core_drift_band": 0.10,
-    "asic_lag_days": 4, "universe_size": 250, "min_history_days": 300, "min_presence": 0.95,
+    "asic_lag_days": 4, "si_max_age_days": 10, "universe_size": 250, "min_history_days": 300, "min_presence": 0.95,
     "min_price": 1.00, "min_mdv60": 2_000_000.0, "max_zero_volume_days": 2, "max_daily_move": 2.0,
     "exclude_tickers": ["STW", "SFY", "A200", "VAS"], "start": "2016-03-31",
     "tax_defer_days": 35, "tax_defer_exit_pct": 0.8, "tax_defer_max_dd": 0.15,
@@ -106,26 +108,66 @@ def brokerage_fee(cfg: dict, side: str, value: float) -> float:
     raise ValueError(f"Unknown broker model: {broker}")
 
 
+def affordable_qty(px: float, slip: float, budget: float, fee_buy) -> int:
+    """Largest integer quantity whose full debit (fill value incl. adverse slippage + the brokerage for that
+    exact order value) fits `budget`. Fees are non-decreasing in value, so walking down from the fee-free
+    bound finds the maximum even across fee discontinuities (e.g. CMC's A$1,000 free-buy limit)."""
+    fill = px * (1 + slip)
+    if not np.isfinite(fill) or fill <= 0 or budget <= 0:
+        return 0
+    q = int(budget // fill)
+    while q > 0 and q * fill + fee_buy(q * fill) > budget + 1e-9:
+        q -= 1  # ponytail: linear walk-down; at most ~fee/fill + 1 steps
+    return q
+
+
+def funded_capacity(cfg: dict, sat_capital: float, cost_mult: float = 1.0) -> int:
+    """Fee-aware number of minimum positions the satellite cash can actually fund: each needs the floor
+    value plus worst-tier adverse slippage plus the buy brokerage at that value. Integer-share rounding can
+    still leave a single candidate short of the floor; such buys are rejected, never forced."""
+    floor = max(cfg["min_position"], cfg["min_parcel"], cfg["min_order"])
+    worst = max(v for k, v in cfg["slippage_tiers"].items() if k != "etf") * cost_mult
+    per = floor * (1 + worst) + brokerage_fee(cfg, "BUY", floor * (1 + worst)) * cost_mult
+    return int(sat_capital // per) if per > 0 else 0
+
+
 def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Dict] = None,
-                    end: Optional[str] = None) -> Dict[str, object]:
+                    end: Optional[str] = None, schedule: Optional[List[tuple]] = None) -> Dict[str, object]:
+    """Legacy fixed-count control (N5/N8...). Lifecycle per decision row i (last session of the month):
+    decide on data up to the close of i -> size an integer order plan at the close of i -> execute at the
+    open of row i+1, where a buy is re-sized down (never up) so its debit fits the order budget and the cash
+    actually available; no open at i+1 = order rejected, nothing filled. Risk exits (persistent
+    ineligibility, regime OFF) run at every monthly decision; rank (alpha) changes only on the rebalance
+    cadence. Holdings without a price for `stale_days` stay on the book, marked at last close x (1 - haircut).
+    Prices are split/dividend-adjusted, so share counts are synthetic research quantities, not executable.
+
+    `schedule` [(from_date, Variant), ...] switches rules inside ONE continuous account (holdings, cash and
+    costs carry over): the investable walk-forward selection (F12). Variants must share capital/core weight."""
     core = cfg["core_ticker"].replace(".AX", "")
     if core not in ctx.A.columns:
         raise ValueError(f"Core ETF {core} missing from the panel; run ingest.")
     rows = ctx.decision_rows(cfg.get("start"), end)
     if not rows:
         raise ValueError("No decision dates in range.")
+    end_ts = pd.Timestamp(end) if end else ctx.dates[-1]
     A_last, AO = ctx.A_last, ctx.AO
     min_order = max(cfg["min_order"], cfg["min_parcel"])
     fee = lambda side, value: brokerage_fee(cfg, side, value) * v.slip_mult  # cost stress scales fees too
+    fee_buy = lambda value: fee("BUY", value)
 
     sat0 = (1 - v.core_weight) * v.capital
-    n_eff = min(v.n, int(sat0 // max(cfg["min_position"], cfg["min_parcel"])))
+    n_nominal = min(v.n, int(sat0 // max(cfg["min_position"], cfg["min_parcel"])))
+    n_eff = min(v.n, funded_capacity(cfg, sat0, v.slip_mult))
     skipped_reason = None
     core_target = v.core_weight
     if n_eff < 3:
-        skipped_reason = f"satellite disabled: A${sat0:,.0f} / A${cfg['min_position']:,.0f} floor < 3 positions"
+        skipped_reason = (f"satellite disabled: A${sat0:,.0f} funds {n_eff} fee-aware positions of "
+                          f"A${max(cfg['min_position'], cfg['min_parcel']):,.0f} (< 3)")
         core_target, n_eff = 1.0, 0
     K = v.buffer_mult * max(n_eff, 1)
+    if schedule:
+        schedule = sorted((pd.Timestamp(d), x) for d, x in schedule)
+        assert all(x.capital == v.capital and x.core_weight == v.core_weight for _, x in schedule)
 
     cash = {"core": 0.0, "sat": 0.0}
     shares: Dict[str, int] = {}          # satellite stocks
@@ -135,57 +177,71 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
     entry_px: Dict[str, float] = {}
     inelig: Dict[str, int] = {}
     orders: List[dict] = []
+    rejected: List[dict] = []
     holds: List[dict] = []
     snaps: List[tuple] = []              # (exec row, {ticker: shares}, total cash)
     positions_count: List[int] = []
     regime_on: Optional[bool] = None
     costs = {"brokerage": 0.0, "slippage": 0.0}
+    stale = lambda t, i: not (ctx.age.iloc[i][t] < cfg["stale_days"])  # NaN age (never priced) counts as stale
 
-    def trade(j: int, ticker: str, side: str, qty: int, sleeve: str, slip: float, px: Optional[float] = None,
-              reason: str = "") -> float:
-        """Fill qty at adjusted open of row j (or px). Returns net cash change."""
+    def trade(i: int, ticker: str, side: str, qty: int, sleeve: str, slip: float, reason: str = "",
+              budget: Optional[float] = None) -> int:
+        """Execute a planned order at the open of row i+1. Returns the filled quantity (0 = rejected)."""
+        j = i + 1
         if qty <= 0:
-            return 0.0
-        raw = float(AO.iloc[j][ticker]) if px is None else px
+            return 0
+        raw = float(AO.iloc[j][ticker])
+        req = {"decision_date": ctx.dates[i], "date": ctx.dates[j], "ticker": ticker, "side": side,
+               "requested": qty, "sleeve": sleeve, "reason": reason}
         if not np.isfinite(raw) or raw <= 0:
-            raw = float(A_last.iloc[j - 1][ticker])
+            rejected.append({**req, "status": "rejected", "why": "no open price at execution"})
+            return 0
+        if side == "BUY":  # declared execution rule: resize down to fit the order budget and available cash
+            qty = min(qty, affordable_qty(raw, slip, min(cash[sleeve], budget if budget is not None else np.inf), fee_buy))
+            if qty <= 0 or qty * raw < min_order:
+                rejected.append({**req, "status": "rejected", "why": "unaffordable or below minimum after gap"})
+                return 0
         fill = raw * (1 + slip) if side == "BUY" else raw * (1 - slip)
         value = qty * fill
         brokerage = fee(side, value)
         costs["brokerage"] += brokerage
         costs["slippage"] += qty * raw * slip
-        orders.append({"date": ctx.dates[j], "ticker": ticker, "side": side, "shares": qty, "price": fill,
-                       "value": value, "brokerage": brokerage, "slippage": qty * raw * slip,
-                       "sleeve": sleeve, "reason": reason})
-        return -(value + brokerage) if side == "BUY" else value - brokerage
-
-    def buy_amount(j: int, ticker: str, amount: float, sleeve: str, slip: float, reason: str = "") -> int:
-        px = float(AO.iloc[j][ticker])
-        if not np.isfinite(px) or px <= 0:
-            return 0
-        qty = int((amount - fee("BUY", amount)) // (px * (1 + slip)))
-        qty = int((amount - fee("BUY", qty * px * (1 + slip))) // (px * (1 + slip)))  # refine with the fee at the real size
-        if 0 < qty and qty * px < cfg["min_parcel"]:  # round up to the minimum parcel if the sleeve's cash covers it
-            up = int(-(-cfg["min_parcel"] // px))
-            if up * px * (1 + slip) + fee("BUY", up * px * (1 + slip)) <= cash[sleeve]:
-                qty = up
-        if qty <= 0 or qty * px < min_order:
-            return 0
-        cash[sleeve] += trade(j, ticker, "BUY", qty, sleeve, slip, reason=reason)
+        orders.append({**req, "shares": qty, "price": fill, "value": value, "brokerage": brokerage,
+                       "slippage": qty * raw * slip, "status": "filled" if qty == req["requested"] else "partial"})
+        cash[sleeve] += -(value + brokerage) if side == "BUY" else value - brokerage
+        assert cash[sleeve] >= -1e-6, f"overdraft {sleeve} {cash[sleeve]}"
         return qty
 
+    def buy_amount(i: int, ticker: str, amount: float, sleeve: str, slip: float, reason: str = "") -> int:
+        """Plan at the decision close of row i (never tomorrow's open), then execute at the next open."""
+        px = float(A_last.iloc[i][ticker])
+        budget = min(amount, cash[sleeve])
+        qty = affordable_qty(px, slip, budget, fee_buy)
+        if qty <= 0 or qty * px < min_order:
+            return 0
+        return trade(i, ticker, "BUY", qty, sleeve, slip, reason, budget=budget)
+
     etf_slip = slippage(cfg, 0, etf=True) * v.slip_mult
+    stock_slip = lambda t, i: slippage(cfg, float(ctx.MDV60.iloc[i].get(t, 0) or 0)) * v.slip_mult
+    mark = lambda t, i: float(px_i[t]) * (1 - cfg["stale_haircut"]) if stale(t, i) else float(px_i[t])
 
     for k, i in enumerate(rows):
         j = i + 1
-        if j >= len(ctx.dates):
-            break
+        if j >= len(ctx.dates) or ctx.dates[j] > end_ts:
+            break  # execution would fall after the requested end: the decision stays pending
         px_i = A_last.iloc[i]
+        if schedule:
+            live = [x for d, x in schedule if d <= ctx.dates[j]]
+            if live and live[-1] != v:
+                v = live[-1]
+                n_eff = 0 if skipped_reason else min(v.n, funded_capacity(cfg, sat0, v.slip_mult))
+                K = v.buffer_mult * max(n_eff, 1)
         if k == 0:  # inception
             cash["core"] = core_target * v.capital
             cash["sat"] = v.capital - cash["core"]
             if cash["core"] >= min_order:
-                core_sh += buy_amount(j, core, cash["core"], "core", etf_slip, "inception")
+                core_sh += buy_amount(i, core, cash["core"], "core", etf_slip, "inception")
 
         # Regime state on ^AORD vs its SMA, evaluated only at decision dates (hysteresis band).
         if v.regime and ctx.aord is not None and n_eff:
@@ -198,65 +254,56 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
         if n_eff:
             ranks = rank_cache[(v.signal, i)] if rank_cache is not None else ctx.ranks(v.signal, i)
             elig = set(ranks.index)
-            # 1. Sells: buffer, persistent ineligibility, stale price, or regime OFF.
+            # 1. Sells. Risk exits (regime OFF, 2 consecutive ineligible/unscored months) every month;
+            #    rank exits (alpha) only on the rebalance cadence. Stale holdings are frozen, not sold.
             for t in list(shares):
-                last_valid = ctx.A[t].iloc[: i + 1].last_valid_index()
-                stale = last_valid is None or (i - ctx.dates.get_loc(last_valid)) >= cfg["stale_days"]
                 inelig[t] = 0 if t in elig else inelig.get(t, 0) + 1
-                rank = ranks.get(t, np.inf)
-                reason = ("stale" if stale else "regime_off" if not on else "rank" if rank > K
-                          else "ineligible" if inelig[t] >= 2 else "")
-                if not trade_month and not stale:
+                if stale(t, i):
                     continue
+                rank = ranks.get(t)
+                reason = ("regime_off" if not on else "ineligible" if inelig[t] >= 2
+                          else "rank" if trade_month and rank is not None and rank > K else "")
                 if not reason:
                     continue
                 if (v.tax_aware and reason == "rank" and 365 - cfg["tax_defer_days"] <= (ctx.dates[j] - entry[t]).days < 365
                         and px_i[t] > entry_px[t] and rank <= cfg["tax_defer_exit_pct"] * len(ranks)
                         and px_i[t] >= entry_px[t] * (1 - cfg["tax_defer_max_dd"])):
                     continue  # defer: a winner a few weeks short of the 12-month CGT discount
-                slip = slippage(cfg, float(ctx.MDV60.iloc[i].get(t, 0) or 0)) * v.slip_mult
-                if stale:
-                    px = float(px_i[t]) * (1 - cfg["stale_haircut"])
-                    cash["sat"] += trade(j, t, "SELL", shares[t], "sat", 0.0, px=px, reason="stale")
-                else:
-                    cash["sat"] += trade(j, t, "SELL", shares[t], "sat", slip, reason=reason)
+                if not trade(i, t, "SELL", shares[t], "sat", stock_slip(t, i), reason):
+                    continue  # no open: still held
                 holds.append({"ticker": t, "entry": entry.pop(t), "exit": ctx.dates[j]})
                 entry_px.pop(t, None)
                 del shares[t]
                 inelig.pop(t, None)
 
-            sat_value = cash["sat"] + sum(shares[t] * px_i[t] for t in shares) + regime_etf * px_i[core]
+            active = [t for t in shares if not stale(t, i)]
+            sat_value = cash["sat"] + sum(shares[t] * mark(t, i) for t in shares) + regime_etf * px_i[core]
             target = sat_value / n_eff
 
-            if not trade_month:
-                pass
-            elif not on:
+            if not on:  # risk event: park satellite cash in the core ETF at once, whatever the cadence
                 if cash["sat"] >= min_order:
-                    regime_etf += buy_amount(j, core, cash["sat"], "sat", etf_slip, "regime_off")
-            else:
+                    regime_etf += buy_amount(i, core, cash["sat"], "sat", etf_slip, "regime_off")
+            elif trade_month:
                 if regime_etf:
-                    cash["sat"] += trade(j, core, "SELL", regime_etf, "sat", etf_slip, reason="regime_on")
-                    regime_etf = 0
+                    regime_etf -= trade(i, core, "SELL", regime_etf, "sat", etf_slip, reason="regime_on")
                 # 5. Trim only a holding that has grown past 2x target.
-                for t in list(shares):
+                for t in active:
                     if shares[t] * px_i[t] > 2 * target:
                         qty = int(shares[t] - target // px_i[t])
                         if qty * px_i[t] >= min_order:
-                            slip = slippage(cfg, float(ctx.MDV60.iloc[i].get(t, 0) or 0)) * v.slip_mult
-                            cash["sat"] += trade(j, t, "SELL", qty, "sat", slip, reason="trim")
-                            shares[t] -= qty
+                            shares[t] -= trade(i, t, "SELL", qty, "sat", stock_slip(t, i), reason="trim")
                 # 4. Fill empty slots with the best-ranked names inside the top N.
                 for t in ranks.index:
-                    if len(shares) >= n_eff:
+                    if len(active) >= n_eff:
                         break
                     if ranks[t] > n_eff or t in shares or not np.isfinite(ctx.A.iloc[i][t]):
                         continue  # never buy a name with no price at the decision close
-                    if v.si_screen and ctx.si(i, t) > cfg["si_max"]:
-                        continue
-                    slip = slippage(cfg, float(ctx.MDV60.iloc[i][t])) * v.slip_mult
-                    qty = buy_amount(j, t, min(target, cash["sat"]), "sat", slip, f"rank {int(ranks[t])}")
+                    if v.si_screen and not ctx.si(i, t) <= cfg["si_max"]:
+                        continue  # missing short interest fails an enabled SI screen (never silently passes)
+                    qty = buy_amount(i, t, min(target, cash["sat"]), "sat", stock_slip(t, i), f"rank {int(ranks[t])}")
                     if qty:
                         shares[t] = qty
+                        active.append(t)
                         entry[t] = ctx.dates[j]
                         entry_px[t] = orders[-1]["price"]
                         inelig[t] = 0
@@ -264,19 +311,18 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
         # Core/satellite rebalance: June decision executes on the first trading day of July.
         if v.core_weight > 0 and n_eff and ctx.dates[j].month == 7 and ctx.dates[i].month == 6:
             total = cash["core"] + cash["sat"] + core_sh * px_i[core] + regime_etf * px_i[core] + \
-                sum(shares[t] * px_i[t] for t in shares)
+                sum(shares[t] * mark(t, i) for t in shares)
             w = (core_sh * px_i[core] + cash["core"]) / total
             if abs(w - v.core_weight) > cfg["core_drift_band"]:
                 diff = (v.core_weight - w) * total
                 if diff > 0 and cash["sat"] >= diff:
                     cash["sat"] -= diff
                     cash["core"] += diff
-                    core_sh += buy_amount(j, core, cash["core"], "core", etf_slip, "rebalance")
+                    core_sh += buy_amount(i, core, cash["core"], "core", etf_slip, "rebalance")
                 elif diff < 0:
                     qty = int(-diff // px_i[core])
                     if qty * px_i[core] >= min_order:
-                        cash["core"] += trade(j, core, "SELL", qty, "core", etf_slip, reason="rebalance")
-                        core_sh -= qty
+                        core_sh -= trade(i, core, "SELL", qty, "core", etf_slip, reason="rebalance")
                         cash["sat"] += cash["core"]
                         cash["core"] = 0.0
 
@@ -285,7 +331,10 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
         book[core] = core_sh + regime_etf
         snaps.append((j, book, cash["core"] + cash["sat"]))
 
-    # Daily equity from holdings snapshots (shares change only on execution days).
+    if not snaps:
+        raise ValueError("No executable decision dates in range.")
+    # Daily equity from holdings snapshots (shares change only on execution days), valued through the latest
+    # observed session <= end. Stale marks carry the haircut; that is a valuation, never cash.
     idx = ctx.dates
     first = snaps[0][0]
     tickers = sorted({t for _, b, _ in snaps for t in b})
@@ -296,24 +345,37 @@ def run_backtest_v2(ctx: Context, v: Variant, cfg: dict, rank_cache: Optional[Di
     cash_s = pd.Series(np.nan, index=idx)
     cash_s.iloc[exec_rows] = [c for _, _, c in snaps]
     cash_s = cash_s.ffill()
-    equity = (held * A_last[tickers].fillna(0.0)).sum(axis=1) + cash_s
+    haircut = (1 - cfg["stale_haircut"] * (~(ctx.age[tickers] < cfg["stale_days"]))).where(held > 0, 1.0)
+    equity = (held * A_last[tickers].fillna(0.0) * haircut).sum(axis=1) + cash_s
     equity.iloc[: first] = v.capital
-    equity = equity.loc[: ctx.dates[min(rows[-1] + 1, len(idx) - 1)]].ffill()
+    equity = equity.loc[: end_ts].ffill()
+    valuation_date = equity.index[-1]
 
-    dec_dates = ctx.dates[rows]
-    monthly = equity.reindex(dec_dates).pct_change().dropna()
+    # Completed-month returns: month-end decision sessions only (the running month is in `equity`, not here).
+    dec_dates = ctx.dates[rows[: len(snaps)]]
+    month_ends = ctx.dates[ctx.decision_rows(cfg.get("start"))]
+    month_ends = month_ends[(month_ends >= dec_dates[0]) & (month_ends <= valuation_date)]
+    monthly = equity.reindex(month_ends).pct_change().dropna()
 
     for t in shares:
         holds.append({"ticker": t, "entry": entry[t], "exit": None})
     # What was held after each decision (index = decision date), for the dashboard's history view.
     books = pd.Series([" ".join(sorted(t for t, q in b.items() if q)) for _, b, _ in snaps],
-                      index=dec_dates[: len(snaps)], dtype=object)
+                      index=dec_dates, dtype=object)
     return {
         "books": books,
         "variant": v, "equity": equity, "monthly": monthly, "orders": pd.DataFrame(orders),
-        "holdings": holds, "positions": positions_count, "costs": costs, "n_eff": n_eff,
+        "rejected": pd.DataFrame(rejected),
+        "holdings": holds, "positions": positions_count, "costs": costs, "n_eff": n_eff, "n_nominal": n_nominal,
         "skipped_reason": skipped_reason, "final_book": {**shares, core: core_sh + regime_etf},
-        "regime_on": regime_on,
+        "frozen": sorted(t for t in shares if stale(t, len(idx[idx <= valuation_date]) - 1)),
+        "cash": cash["core"] + cash["sat"],
+        "regime_on": regime_on, "valuation_date": valuation_date,
+        "last_decision_date": dec_dates[-1], "last_execution_date": ctx.dates[snaps[-1][0]],
+        "cadence": {"alpha": "quarterly" if v.rebalance == "Q" else "monthly",
+                    "risk": "monthly decision close (last session of each month), executed next open"},
+        "price_basis": "adjusted_total_return_synthetic", "executable_quantities": False,
+        "calendar_id": getattr(ctx, "calendar_id", None),
     }
 
 
@@ -322,11 +384,15 @@ def after_tax_monthly(res: Dict[str, object], rate: float) -> pd.Series:
 
     FIFO lots per ticker; capital losses (current and carried forward) offset non-discount gains first;
     the 50% discount applies to what remains of gains on lots held over 12 months. Each financial
-    year's tax is paid at the first month-end on or after 31 October following it (or the last month
-    if the data ends first), as a fraction of equity so later returns compound on the smaller balance.
-    ponytail: ignores dividend tax and franking (adjusted prices fold dividends into gains), brokerage
-    in the cost base and personal circumstances; a rough guide, not tax advice.
+    year's tax is paid at the first month-end on or after 31 October following it, as a fraction of equity so
+    later returns compound on the smaller balance. A payment due after the data ends is NOT pulled into the
+    last month; it is reported in `.attrs["unpaid_tax"]` instead. Brokerage is in the cost base / reduces
+    proceeds when orders carry it. Discount eligibility uses the calendar rule in `accounting.discount_eligible`.
+    ESTIMATED OVERLAY: ignores dividend tax and franking (adjusted prices fold dividends into gains), the
+    account's tax status and personal circumstances; not tax advice and not a cash re-simulation.
     """
+    from ml.accounting import discount_eligible
+
     monthly: pd.Series = res["monthly"]
     orders: pd.DataFrame = res["orders"]
     if not rate or orders.empty or monthly.empty:
@@ -334,24 +400,26 @@ def after_tax_monthly(res: Dict[str, object], rate: float) -> pd.Series:
     lots: Dict[str, deque] = defaultdict(deque)
     fy_parts: Dict[int, List[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])  # short gain, long gain, loss
     for o in orders.sort_values("date", kind="stable").itertuples(index=False):
+        fee = float(getattr(o, "brokerage", 0.0) or 0.0) / int(o.shares)  # per share
         if o.side == "BUY":
-            lots[o.ticker].append([int(o.shares), float(o.price), o.date])
+            lots[o.ticker].append([int(o.shares), float(o.price) + fee, o.date])
             continue
         qty, fy = int(o.shares), o.date.year + (o.date.month >= 7)
         while qty > 0 and lots[o.ticker]:
             lot = lots[o.ticker][0]
             q = min(qty, lot[0])
-            gain = q * (float(o.price) - lot[1])
+            gain = q * (float(o.price) - fee - lot[1])
             if gain < 0:
                 fy_parts[fy][2] -= gain
             else:
-                fy_parts[fy][1 if (o.date - lot[2]).days > 365 else 0] += gain
+                fy_parts[fy][1 if discount_eligible(lot[2], o.date) else 0] += gain
             lot[0] -= q
             qty -= q
             if not lot[0]:
                 lots[o.ticker].popleft()
     frac = pd.Series(0.0, index=monthly.index)
     carry = 0.0
+    unpaid = {}
     for fy in sorted(fy_parts):
         short, long_, loss = fy_parts[fy]
         loss += carry
@@ -363,9 +431,14 @@ def after_tax_monthly(res: Dict[str, object], rate: float) -> pd.Series:
         if tax <= 0:
             continue
         due = monthly.index[monthly.index >= pd.Timestamp(fy, 10, 31)]
-        when = due[0] if len(due) else monthly.index[-1]
+        if not len(due):
+            unpaid[f"FY{fy}"] = tax  # falls due after the data ends
+            continue
+        when = due[0]
         frac[when] = 1 - (1 - frac[when]) * (1 - tax / float(res["equity"].loc[when]))
-    return (1 + monthly) * (1 - frac) - 1
+    out = (1 + monthly) * (1 - frac) - 1
+    out.attrs["unpaid_tax"] = unpaid
+    return out
 
 
 def ew_universe(ctx: Context, cfg: dict, end: Optional[str] = None) -> pd.Series:

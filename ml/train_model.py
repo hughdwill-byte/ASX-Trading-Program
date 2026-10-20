@@ -5,7 +5,7 @@ import datetime as dt
 import logging
 import pathlib
 import sys
-from typing import Any, Dict, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 if __package__ is None or __package__ == "":
     # Allow running as a script via ``python ml/train_model.py`` by pushing the project root onto sys.path.
@@ -16,7 +16,6 @@ if __package__ is None or __package__ == "":
 
 import joblib
 import numpy as np
-import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -35,10 +34,11 @@ except ImportError:  # pragma: no cover - optional dependency
     lgb = None
     LIGHTGBM_AVAILABLE = False
 
-from ml.dataset_builder import build_dataset
+from ml.dataset_builder import apply_preprocessor, build_dataset, fit_preprocessor, purged_split
 from stocktrade import ensure_directory, project_path
 
 logger = logging.getLogger(__name__)
+ARTIFACT_SCHEMA = "classifier_v2"   # schema + feature order + preprocessor + target are versioned together
 
 
 def train_model(
@@ -51,6 +51,7 @@ def train_model(
     save_processed: bool = True,
     algorithm: str = "auto",
     model_path: Optional[Union[str, pathlib.Path]] = None,
+    horizon: int = 1,
 ) -> Dict[str, Any]:
     """
     Train a supervised classifier to predict next-day price direction.
@@ -67,44 +68,29 @@ def train_model(
         end_date=end_date,
         normalise=normalise,
         save_processed=save_processed,
+        horizon=horizon,
     )
 
     if y.empty or X.empty:
         raise RuntimeError("Dataset is empty; cannot train model.")
 
-    preprocessor = X.attrs.get("preprocessor", {})
-    scaler = preprocessor.get("scaler")
-    imputer = preprocessor.get("imputer")
-    if imputer is None:
-        raise RuntimeError("Dataset build did not supply an imputer for preprocessing.")
-
     feature_names = list(X.columns)
+    label_end = X.attrs["label_end"]
     index_dates = X.index.get_level_values("date")
-    unique_dates = np.array(sorted(index_dates.unique()))
-    if unique_dates.shape[0] < 2:
-        raise RuntimeError("Not enough distinct trading days to perform a train/test split.")
-
-    split_idx = max(1, int(0.8 * len(unique_dates)))
-    if split_idx >= len(unique_dates):
-        split_idx = len(unique_dates) - 1
-    split_date = unique_dates[split_idx]
-
-    date_mask = pd.Series(index_dates <= split_date, index=X.index)
-    train_mask = date_mask
-    test_mask = ~train_mask
-    if not test_mask.any():
-        # Ensure at least the final day is held out.
-        last_day = unique_dates[-1]
-        test_mask = pd.Series(index_dates == last_day, index=X.index)
-        train_mask = ~test_mask
-
-    X_train = X.loc[train_mask]
-    y_train = y.loc[train_mask]
-    X_test = X.loc[test_mask]
-    y_test = y.loc[test_mask]
-
+    # Chronological, date-grouped split; training labels overlapping the test period are purged (F10).
+    train_mask, test_mask, split_info = purged_split(index_dates, label_end, test_frac=0.2)
+    X_train, y_train = X.loc[train_mask], y.loc[train_mask]
+    X_test, y_test = X.loc[test_mask], y.loc[test_mask]
     if X_train.empty or X_test.empty:
         raise RuntimeError("Train/test split failed; one of the partitions is empty.")
+    # Threshold from temporal out-of-fold predictions inside the training period (purged inner split).
+    inner_tr, inner_cal, inner_info = purged_split(index_dates[train_mask], label_end[train_mask], test_frac=0.2)
+    pp_inner = fit_preprocessor(X_train.loc[inner_tr], normalise)
+    inner_est, _ = _build_estimator((algorithm or "auto").lower())
+    inner_est.fit(apply_preprocessor(pp_inner, X_train.loc[inner_tr]), y_train.loc[inner_tr].to_numpy())
+    oof_proba = _predict_proba(inner_est, apply_preprocessor(pp_inner, X_train.loc[inner_cal]))
+    threshold = _optimise_threshold(y_train.loc[inner_cal].to_numpy(), oof_proba)
+    preprocessor = fit_preprocessor(X_train, normalise)   # final fit: training fold only, never test/future
 
     algorithm = (algorithm or "auto").lower()
     estimator, algorithm_used = _build_estimator(algorithm)
@@ -115,12 +101,12 @@ def train_model(
         len(feature_names),
     )
 
-    estimator.fit(X_train.to_numpy(), y_train.to_numpy())
+    Xtr, Xte = apply_preprocessor(preprocessor, X_train), apply_preprocessor(preprocessor, X_test)
+    estimator.fit(Xtr, y_train.to_numpy())
 
-    train_proba = _predict_proba(estimator, X_train.to_numpy())
-    test_proba = _predict_proba(estimator, X_test.to_numpy())
+    train_proba = _predict_proba(estimator, Xtr)
+    test_proba = _predict_proba(estimator, Xte)
 
-    threshold = _optimise_threshold(y_train.to_numpy(), train_proba)
     train_preds = (train_proba >= threshold).astype(int)
     test_preds = (test_proba >= threshold).astype(int)
 
@@ -140,9 +126,13 @@ def train_model(
     )
 
     artifact = {
+        "schema": ARTIFACT_SCHEMA,
         "model": estimator,
         "feature_names": feature_names,
-        "preprocessor": {"imputer": imputer, "scaler": scaler},
+        "preprocessor": preprocessor,
+        "target": X.attrs.get("target"),
+        "split": {**split_info, "threshold_fold": inner_info,
+                  "evaluation": "chronological out-of-sample test (last 20% of dates, purged); train metrics are in-sample"},
         "threshold": float(threshold),
         "algorithm": algorithm_used,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),

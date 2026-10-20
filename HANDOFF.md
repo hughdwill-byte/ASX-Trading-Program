@@ -1,5 +1,9 @@
 # Handoff: next improvements (strategy v3)
 
+> **Update (2026-10-20):** `ASX_IMPLEMENT.md` supersedes the fixed-count plans below. Repairs F01-F27 and the research
+> optimiser (no holding cap) are tracked in `IMPLEMENTATION_STATUS.md`, which lists the current self-checks
+> (seven test files + pyflakes). The engine changed (`ENGINE_ID`), so research must be rerun before any tier counts.
+
 For a fresh Claude session. Read this whole file before changing anything. The owner may also attach
 `ASX_Program_Improvement_Research.txt` (an AI-generated research report). Use it for background only:
 **where it disagrees with this file, this file wins.** Some of its tickers, file paths and numbers are wrong

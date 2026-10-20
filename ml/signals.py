@@ -26,24 +26,32 @@ class Context:
     def __init__(self, panel: Dict[str, pd.DataFrame], aord: Optional[pd.Series], cfg: dict,
                  tfm_dir: Optional[pathlib.Path] = None, asic: Optional[pd.DataFrame] = None) -> None:
         adj = panel["adj_close"]
-        counts = adj.notna().sum(axis=1)
-        # Calendar: days on which a reasonable share of the market traded (drops stray Yahoo rows).
-        keep = counts >= max(5, 0.3 * float(counts.median()))
-        self.dates = adj.index[keep]
+        self.dates, self.calendar_id = session_calendar(adj, cfg)
         cut = lambda f: f.loc[self.dates]
         self.A = cut(adj)
         self.C = cut(panel["close"])
         self.V = cut(panel["volume"]).fillna(0.0)
         self.AO = cut(panel["adj_open"])
         self.A_last = self.A.ffill()  # valuation: last known adjusted close
+        self.refresh_age()
         self.cfg = cfg
         self.aord = aord.reindex(self.dates, method="ffill") if aord is not None else None
         self.tfm_dir = tfm_dir
-        self.asic = asic.reindex(self.dates).ffill() if asic is not None else None  # usable SI per date
+        if asic is not None:   # usable SI per session (as-of join; stale -> NaN, never 0)
+            from ml.data_asic import as_of
+
+            asic = as_of(asic, self.dates, cfg.get("si_max_age_days", 10))
+        self.asic = asic
         self._tfm_cache: Dict[str, Dict[pd.Timestamp, pd.Series]] = {}
         self._build()
 
     # ---- precompute -------------------------------------------------------------------
+    def refresh_age(self) -> None:
+        """Rows since the last real price (stale marks are haircut in valuation, never sold at a made-up price)."""
+        rows = np.arange(len(self.dates), dtype=float)[:, None]
+        last = pd.DataFrame(np.where(self.A.notna(), rows, np.nan), index=self.dates, columns=self.A.columns).ffill()
+        self.age = pd.DataFrame(rows - last.to_numpy(), index=self.dates, columns=self.A.columns)
+
     def _build(self) -> None:
         A, C, V = self.A, self.C, self.V
         ff = A.ffill(limit=5)
@@ -140,6 +148,22 @@ class Context:
         if end:
             rows = rows[d[rows] <= pd.Timestamp(end)]
         return [int(i) for i in rows]
+
+
+def session_calendar(adj: pd.DataFrame, cfg: dict):
+    """Trading sessions and a calendar id. Uses a versioned session file (`session_calendar` in cfg: CSV with a
+    `date` column) when given; otherwise a causal fallback: a weekday counts as a session when its number of
+    priced tickers is at least 30% of the median over the previous 20 rows. Only rows up to t decide row t,
+    so later listings or missing data can never remove an earlier session."""
+    path = cfg.get("session_calendar")
+    if path and pathlib.Path(path).exists():
+        cal = pd.DatetimeIndex(pd.read_csv(path, parse_dates=["date"])["date"])
+        version = cfg.get("session_calendar_version") or pathlib.Path(path).stem
+        return adj.index[adj.index.isin(cal)], f"file:{version}"
+    counts = adj.notna().sum(axis=1)
+    ref = counts.shift(1).rolling(20, min_periods=1).median()
+    keep = (adj.index.dayofweek < 5) & (counts >= np.maximum(1, 0.3 * ref.fillna(0)))
+    return adj.index[keep.to_numpy()], "causal_count_v1"
 
 
 def zscore(s: pd.Series) -> pd.Series:

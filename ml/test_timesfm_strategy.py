@@ -45,9 +45,16 @@ def test_backtest():
         periods = report["periods"]
         assert periods and all(p["picks"] == 1 for p in periods)
         assert all(t["symbol"] == "UP" for t in report["trades"])
-        # entry at next open (= signal close), exit at close 2 sessions later.
-        expected = 1000.0 * 1.01 ** (2 * len(periods))
+        # entry at next open (= signal close), exit at close 2 sessions later; a final period that would exit
+        # after the end is marked at the last session and flagged open.
+        idx = panel["adj_close"].index
+        sessions = sum(idx.get_loc(p["exit_date"]) - idx.get_loc(p["signal_date"]) for p in periods)
+        expected = 1000.0 * 1.01 ** sessions
         assert abs(report["strategy"]["final_equity"] - expected) < 1e-6, report["strategy"]
+        assert periods[-1]["open"] and periods[-1]["exit_date"] == idx[-1] and not periods[0]["open"]
+        cut = SimpleNamespace(**{**vars(args), "end_date": "2024-05-15"})
+        bounded = run_backtest(panel, eligible, cut, extrapolate, cache, 1000.0, 0.0, 0.0)
+        assert max(p["exit_date"] for p in bounded["periods"]) <= pd.Timestamp("2024-05-15")
 
         # No look-ahead: every context ends exactly at its signal-date close.
         signal_closes = {round(panel["adj_close"].loc[p["signal_date"], s], 9)

@@ -242,7 +242,7 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
       <label>Capital <select id="cmp-setting"></select></label>
     </div>
     <div class="tbl-wrap" id="cmp-table"></div>
-    <p class="sub small">Net of A$6.50 brokerage and tiered slippage. Click a column to sort. <span class="pass-key">Highlighted</span> = passes all nine acceptance tests. Grey = not run (reason shown). Excess return is annualised vs VAS.AX with a 90% bootstrap interval.</p>
+    <p class="sub small">Net of the modelled broker's fees (see broker model below) and tiered slippage. Click a column to sort. <span class="pass-key">Highlighted</span> = passes all nine acceptance tests. Grey = not run (reason shown). Excess return is annualised vs VAS.AX with a 90% bootstrap interval.</p>
     <div class="two-col" id="val-box"></div>
   </section>
 
@@ -634,10 +634,10 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
     $("rec-tier-text").textContent = TIER_TEXT[tier] || tier;
     $("rec-asof").textContent = r.as_of ? `As of ${fmtDate(r.as_of)}` : "";
     $("rec-action").textContent = r.action_text || "";
-    const orders = d.orders_next_open || [];
+    const orders = d.paper_proposals || d.orders_next_open || [];
     $("rec-orders").hidden = !orders.length;
     if (orders.length) {
-      $("rec-orders").replaceChildren(el("table", {}, [
+      $("rec-orders").replaceChildren(el("p", { class: "sub small", text: "Paper proposals: estimates for the hypothetical research book (adjusted prices), not broker orders. No orders are placed by this program." }), el("table", {}, [
         el("thead", {}, el("tr", {}, ["Side", "Stock", "Shares", "Est. price", "Est. cost"].map((h, i) => el("th", { class: i > 1 ? "r" : "", text: h })))),
         el("tbody", {}, orders.map((o) => el("tr", {}, [
           el("td", { text: o.side }), el("td", { class: "mono", text: o.ticker }),
@@ -758,6 +758,12 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 0.82re
   const SIGNAL_NAMES = { RAMOM: "Risk-adjusted momentum", RESMOM: "Residual momentum", COMBO: "Momentum + low-vol blend", LOWVOL: "Low volatility",
     TFM_REL: "TimesFM (vs index)", TFM_RAW: "TimesFM (price)" };
   function strategyLabel(id) {
+    const o = /^OPT_([A-Z_]+?)_(nocap|cap\d+)_(var|ew|ivol)(_rank)?/.exec(id || "");
+    if (o) {
+      const size = { var: "risk/cost-optimised weights", ew: "equal weights", ivol: "inverse-volatility weights" }[o[3]];
+      return [SIGNAL_NAMES[o[1]] || o[1], o[2] === "nocap" ? "no holding cap" : `at most ${o[2].slice(3)} stocks`, size,
+        o[4] ? "rank-selected" : "optimiser-selected", "research only"].join(" · ");
+    }
     const m = /^([A-Z_]+?)_N(\d+)_(reg|noreg)_B(\d+)(_SI)?(_Q)?(_TAX)?/.exec(id || "");
     if (!m) return id;
     const parts = [SIGNAL_NAMES[m[1]] || m[1], `${m[2]} stocks`, m[3] === "reg" ? "trend filter" : "no trend filter"];

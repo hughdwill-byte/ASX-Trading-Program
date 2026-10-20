@@ -2,8 +2,10 @@
 
 Files: https://download.asic.gov.au/short-selling/RR{YYYYMMDD}-001-SSDailyAggShortPos.csv
 (same pattern as update_short_positions_csv.py). Cached to data/asic_short/YYYYMMDD.csv,
-1 request per second, resumable. Missing days (holidays, unpublished) are remembered in
-data/asic_short/missing.txt so reruns skip them.
+1 request per second, resumable. A 404 is remembered in data/asic_short/missing.txt (and skipped on reruns)
+only once the report date is older than `retry_days` calendar days: recent 404s are usually "not published
+yet" and are retried. Every download is logged in data/asic_short/downloads.csv (report date, downloaded_at).
+Usable date = report date + `lag_days` business days (the publication time itself is not available).
 """
 
 from __future__ import annotations
@@ -22,13 +24,16 @@ from update_short_positions_csv import DAILY_URL
 logger = logging.getLogger(__name__)
 
 
-def download(base: pathlib.Path, start: str, end: Optional[str] = None, pause: float = 1.0) -> dict:
+def download(base: pathlib.Path, start: str, end: Optional[str] = None, pause: float = 1.0, retry_days: int = 14,
+             session=None, today: Optional[pd.Timestamp] = None) -> dict:
     base.mkdir(parents=True, exist_ok=True)
     missing_path = base / "missing.txt"
     missing = set(missing_path.read_text().split()) if missing_path.exists() else set()
     got = failed = 0
-    session = requests.Session()
-    for day in pd.bdate_range(start, end or pd.Timestamp.today()):
+    session = session or requests.Session()
+    today = pd.Timestamp(today or pd.Timestamp.today()).normalize()
+    log = []
+    for day in pd.bdate_range(start, end or today):
         tag = f"{day:%Y%m%d}"
         dest = base / f"{tag}.csv"
         if dest.exists() or tag in missing:
@@ -37,9 +42,11 @@ def download(base: pathlib.Path, start: str, end: Optional[str] = None, pause: f
             try:
                 r = session.get(DAILY_URL.format(date=tag), timeout=30)
                 if r.status_code == 404:
-                    missing.add(tag)
+                    if (today - day).days > retry_days:
+                        missing.add(tag)   # old enough: treat as never published (holiday / no report)
                 elif r.ok and len(r.content) > 100:
                     dest.write_bytes(r.content)
+                    log.append({"report_date": tag, "downloaded_at": pd.Timestamp.now(tz="UTC").isoformat()})
                     got += 1
                 else:
                     r.raise_for_status()
@@ -51,6 +58,9 @@ def download(base: pathlib.Path, start: str, end: Optional[str] = None, pause: f
                 time.sleep(2 ** attempt)
         time.sleep(pause)
     missing_path.write_text("\n".join(sorted(missing)))
+    if log:
+        lp = base / "downloads.csv"
+        pd.DataFrame(log).to_csv(lp, mode="a", header=not lp.exists(), index=False)
     logger.info("ASIC download: %d new files, %d failures.", got, failed)
     return {"new": got, "failed": failed}
 
@@ -86,6 +96,17 @@ def load_si(base: pathlib.Path, lag_days: int = 4) -> Optional[pd.DataFrame]:
         return None
     frame = pd.DataFrame({d: s[~s.index.duplicated()] for d, s in rows.items()}).T.sort_index()
     return frame
+
+
+def as_of(si: pd.DataFrame, sessions: pd.DatetimeIndex, max_age_days: int = 10) -> pd.DataFrame:
+    """As-of join of SI (keyed by usable date, which may fall on a non-session day) onto sessions. The join runs
+    on the union of dates BEFORE selecting sessions, so a non-session update is not lost. Values older than
+    `max_age_days` calendar days are NaN (stale = missing, never zero)."""
+    union = si.index.union(sessions)
+    vals = si.reindex(union).ffill().reindex(sessions)
+    stamp = pd.Series(si.index, index=si.index).reindex(union).ffill().reindex(sessions)
+    fresh = (sessions - pd.DatetimeIndex(stamp)).days <= max_age_days
+    return vals.where(pd.Series(fresh, index=sessions), axis=0)
 
 
 def coverage(base: pathlib.Path, start: str = "2016-01-01") -> dict:
