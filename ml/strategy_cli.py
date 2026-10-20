@@ -232,7 +232,7 @@ def strat_backtest(ctx: Context, cfg: dict, args) -> int:
 
     ew_m = ew_universe(ctx, cfg, end)
     aord_m = ctx.aord.reindex(ctx.dates[ctx.decision_rows(cfg["start"], end)]).pct_change().dropna() \
-        if ctx.aord is not None else pd.Series(dtype=float)
+        if ctx.aord is not None else pd.Series(dtype=float, index=pd.DatetimeIndex([]))  # AORD download can fail (Yahoo 429)
 
     compare: List[dict] = []
     trials: List[dict] = []
