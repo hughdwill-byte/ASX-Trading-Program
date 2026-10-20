@@ -450,7 +450,8 @@ def _configured_setting(cfg: dict) -> str:
 def _with_pending_day(ctx: Context) -> Context:
     """Append a placeholder next business day (prices = last close) so the engine emits next-open orders."""
     nxt = ctx.dates[-1] + pd.offsets.BDay(1)
-    for name in ("A", "C", "V", "AO", "A_last", "MDV60", "base", "VOL_252", "VOL_63", "MOM_12_1", "RAMOM", "RESMOM", "LOWVOL"):
+    for name in ("A", "C", "V", "AO", "A_last", "MDV60", "base", "VOL_252", "VOL_63", "MOM_12_1", "RAMOM", "RESMOM", "LOWVOL",
+                 "age"):
         f = getattr(ctx, name)
         row = ctx.A_last.iloc[[-1]] if name in ("AO",) else f.iloc[[-1]]
         if name == "base":

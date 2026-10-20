@@ -131,9 +131,10 @@ def test_buffer_and_costs():
     t01 = first[first["ticker"] == "T01"].iloc[0]
     assert abs(t00["price"] - 10 * 1.001) < 1e-9 and abs(t01["price"] - 10 * 1.0025) < 1e-9
     assert all(float(x).is_integer() for x in o["shares"])
-    # min_order: nothing is bought when every order would be below it
+    # min_order: no stock is bought when every order would be below it (A$9,000 funds one A$5,000 floor ->
+    # satellite disabled, account holds the core ETF)
     r2 = run_backtest_v2(ctx, v, dict(cfg, min_order=5000), rc)
-    assert (r2["orders"]["side"] != "BUY").all() if len(r2["orders"]) else True
+    assert r2["n_eff"] == 0 and set(r2["orders"]["ticker"]) == {"VAS"}
 
 
 def test_broker_fees():
@@ -150,7 +151,8 @@ def test_min_parcel():
     rows = ctx.decision_rows(cfg["start"])
     rc = {("RAMOM", i): ranks_series([f"T{k:02d}" for k in range(10)]) for i in rows}
     r = run_backtest_v2(ctx, Variant(n=5, regime=False, capital=2000), cfg, rc)
-    assert r["n_eff"] == 4
+    # was n_eff == 4 (nominal 2000 // 500): four A$500 parcels plus fees and slippage overdraw A$2,000
+    assert r["n_nominal"] == 4 and r["n_eff"] == 3
     buys = r["orders"][r["orders"]["side"] == "BUY"]
     assert len(buys) and (buys["value"] >= 500).all()
     assert abs(r["costs"]["brokerage"] - 3.0 * len(r["orders"])) < 1e-9
@@ -230,9 +232,15 @@ def test_effective_n_and_stale():
     rc = {("RAMOM", i): ranks_series([f"T{k:02d}" for k in range(10)]) for i in rows}
     gap_end = rows[2]
     ctx.A.iloc[gap_end - 12:, ctx.A.columns.get_loc("T00")] = np.nan
+    ctx.refresh_age()
     r = run_backtest_v2(ctx, Variant(n=3, regime=False, capital=9000), cfg, rc)
-    stale = r["orders"][r["orders"]["reason"] == "stale"]
-    assert len(stale) == 1 and abs(stale.iloc[0]["price"] - 10 * 0.70) < 1e-9
+    # was: a "stale" sale at last close x 0.70 (fictitious liquidation, invented cash). Now the holding stays on
+    # the book, marked at the haircut, and no order or cash comes from it.
+    o = r["orders"]
+    assert not ((o["ticker"] == "T00") & (o["side"] == "SELL")).any()
+    assert "T00" in r["frozen"] and r["final_book"]["T00"] > 0
+    others = sum(q * 10.0 for t, q in r["final_book"].items() if t not in ("T00", "VAS")) + r["final_book"]["VAS"] * 50
+    assert abs(r["equity"].iloc[-1] - (r["cash"] + others + r["final_book"]["T00"] * 10 * 0.70)) < 1e-6
 
 
 def test_selection_and_gate():

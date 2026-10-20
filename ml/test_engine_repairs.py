@@ -1,0 +1,197 @@
+"""Regression fixtures for the engine repairs F01-F05 (synthetic data only; no network).
+
+Run: python ml/test_engine_repairs.py
+"""
+
+import pathlib
+import sys
+import time
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+from ml.portfolio import DEFAULTS, Variant, affordable_qty, brokerage_fee, funded_capacity, run_backtest_v2  # noqa: E402
+from ml.signals import Context  # noqa: E402
+
+CFG = dict(DEFAULTS, min_mdv60=0.0, exclude_tickers=[], min_history_days=1, min_presence=0.0)
+
+
+def panel_from(adj, volume=5e5, opens=None):
+    open_ = adj.shift(1).fillna(adj.iloc[0]) if opens is None else opens
+    return {"adj_close": adj, "close": adj.copy(), "open": open_, "volume": adj * 0 + volume, "adj_open": open_}
+
+
+def flat(days=320, n=10, px=10.0):
+    idx = pd.bdate_range("2016-01-01", periods=days)
+    return pd.DataFrame({f"T{i:02d}": px for i in range(n)} | {"VAS": 50.0}, index=idx)
+
+
+def ranks_series(order):
+    return pd.Series(np.arange(1, len(order) + 1), index=order)
+
+
+def run(adj, v, cfg, order_fn, opens=None):
+    cfg = dict(cfg, start=str(adj.index[70].date()))
+    ctx = Context(panel_from(adj, opens=opens), None, cfg)
+    rows = ctx.decision_rows(cfg["start"])
+    rc = {("RAMOM", i): order_fn(k, i) for k, i in enumerate(rows)}
+    return ctx, rows, run_backtest_v2(ctx, v, cfg, rc)
+
+
+def debit(o):
+    return float((o["value"] + o["brokerage"]).sum())
+
+
+def test_f01_cmc_three_positions_no_overdraft():
+    cfg = dict(CFG, broker="cmc", min_position=500.0, min_order=500.0, min_parcel=500.0,
+               slippage_tiers={"high": 0.0025, "mid": 0.0025, "low": 0.0025, "etf": 0.0025})
+    fee = lambda value: brokerage_fee(cfg, "BUY", value)
+    # old two-pass sizing: 100 shares x 10.025 = 1,002.50 + A$11 = 1,013.50 per name -> A$3,040.50 from A$3,030
+    assert affordable_qty(10.0, 0.0025, 1010.0, fee) == 99            # 992.48, free CMC buy under A$1,000
+    names = [f"T{i:02d}" for i in range(10)]
+    _, _, r = run(flat(), Variant(n=3, regime=False, buffer_mult=1, capital=3030), cfg, lambda k, i: ranks_series(names))
+    buys = r["orders"][r["orders"]["side"] == "BUY"]
+    first = buys[buys["date"] == buys["date"].min()]
+    assert len(first) == 3 and debit(first) <= 3030 + 1e-9, debit(first)
+    assert r["cash"] >= 0 and (r["equity"] > 0).all()
+
+
+def test_f01_fee_boundaries_and_expensive_shares():
+    for broker in ("flat", "stake", "cmc"):
+        cfg = dict(CFG, broker=broker)
+        fee = lambda value: brokerage_fee(cfg, "BUY", value)
+        for budget in (499.0, 500.0, 999.0, 1000.0, 1001.0, 1011.0, 1012.0, 29_999.0, 30_003.0, 30_010.0, 40_004.0, 40_010.0):
+            for px in (0.37, 1.0, 9.99, 100.0, 333.33, 600.0):
+                for slip in (0.0, 0.0025):
+                    q = affordable_qty(px, slip, budget, fee)
+                    fill = px * (1 + slip)
+                    assert q * fill + fee(q * fill) <= budget + 1e-9, (broker, budget, px, q)
+                    assert (q + 1) * fill + fee((q + 1) * fill) > budget - 1e-9, (broker, budget, px, q)  # maximal
+    stake = lambda value: brokerage_fee(dict(CFG, broker="stake"), "BUY", value)
+    assert affordable_qty(100.0, 0.0, 30_003.0, stake) == 300             # 30,000 + A$3
+    assert affordable_qty(100.0, 0.0, 30_002.9, stake) == 299
+    assert affordable_qty(100.0, 0.0, 40_004.0, stake) == 400             # 40,000 + 0.01% = A$4
+    cmc = lambda value: brokerage_fee(dict(CFG, broker="cmc"), "BUY", value)
+    assert affordable_qty(10.0, 0.0, 1010.0, cmc) == 100 and affordable_qty(10.0, 0.0, 1010.99, cmc) == 100
+    assert affordable_qty(10.0, 0.0, 1011.0, cmc) == 100                  # 1,010 would cost A$1,021
+    # expensive share: one A$400 share fits A$700 but is below the A$500 parcel -> no buy, never rounded up
+    cfg = dict(CFG, broker="stake")
+    adj = flat(px=400.0)
+    names = [f"T{i:02d}" for i in range(10)]
+    _, _, r = run(adj, Variant(n=3, regime=False, capital=2100), cfg, lambda k, i: ranks_series(names))
+    assert r["n_eff"] == 3
+    stock_buys = r["orders"][(r["orders"]["side"] == "BUY") & (r["orders"]["ticker"] != "VAS")] if len(r["orders"]) else []
+    assert len(stock_buys) == 0 or (stock_buys["shares"] * 400 >= 500).all()
+
+
+def test_capacity_is_fee_aware():
+    cfg = dict(CFG, broker="stake")
+    assert funded_capacity(cfg, 1500.0) == 2      # nominal 1500 // 500 = 3, but fees and slippage overdraw
+    assert funded_capacity(cfg, 4000.0) == 7      # nominal 8
+    names = [f"T{i:02d}" for i in range(10)]
+    _, _, r = run(flat(), Variant(n=3, regime=False, capital=1500), cfg, lambda k, i: ranks_series(names))
+    assert r["n_nominal"] == 3 and r["n_eff"] == 0 and "disabled" in r["skipped_reason"]
+    _, _, r = run(flat(), Variant(n=8, regime=False, capital=4000), cfg, lambda k, i: ranks_series(names))
+    assert r["n_nominal"] == 8 and r["n_eff"] == 7
+    buys = r["orders"][r["orders"]["side"] == "BUY"]
+    assert debit(buys[buys["date"] == buys["date"].min()]) <= 4000 and (buys["value"] >= 500).all()
+
+
+def test_f02_missing_open_no_fill():
+    adj = flat()
+    opens = adj.shift(1).fillna(adj.iloc[0])
+    cfg = dict(CFG, broker="flat", start=str(adj.index[70].date()))
+    ctx = Context(panel_from(adj, opens=opens), None, cfg)
+    j = ctx.decision_rows(cfg["start"])[0] + 1
+    opens.iloc[j, opens.columns.get_loc("T00")] = np.nan  # T00 has no open on the first execution day
+    names = [f"T{i:02d}" for i in range(10)]
+    _, _, r = run(adj, Variant(n=3, regime=False, capital=9000), cfg, lambda k, i: ranks_series(names), opens=opens)
+    first = r["orders"][r["orders"]["date"] == adj.index[j]]
+    assert "T00" not in set(first["ticker"])
+    rej = r["rejected"]
+    assert len(rej) == 1 and rej.iloc[0]["ticker"] == "T00" and rej.iloc[0]["status"] == "rejected"
+    assert abs(r["cash"] + debit(r["orders"]) - 9000) < 1e-6   # cash moved only by real fills
+    # a sell with no open stays on the book
+    adj2 = flat()
+    opens2 = adj2.shift(1).fillna(adj2.iloc[0])
+    ctx2 = Context(panel_from(adj2, opens=opens2), None, cfg)
+    rows = ctx2.decision_rows(cfg["start"])
+    opens2.iloc[rows[1] + 1, opens2.columns.get_loc("T00")] = np.nan
+    swap = ["T05", "T06", "T07", "T08", "T09", "T01", "T02", "T03", "T04", "T00"]
+    _, _, r2 = run(adj2, Variant(n=3, regime=False, buffer_mult=1, capital=9000), cfg,
+                   lambda k, i: ranks_series(names if k == 0 else swap), opens=opens2)
+    o = r2["orders"]
+    t00 = o[(o["ticker"] == "T00") & (o["side"] == "SELL")]
+    assert len(t00) == 1 and t00.iloc[0]["date"] == adj2.index[rows[2] + 1]  # sold at the next review instead
+
+
+def test_f03_causal_calendar():
+    idx = pd.bdate_range("2016-01-01", periods=400)
+    early = pd.DataFrame({f"E{i}": 10.0 for i in range(6)}, index=idx)
+    late = pd.DataFrame({f"L{i:02d}": 10.0 for i in range(30)}, index=idx)
+    late.iloc[:100] = np.nan                     # thirty tickers list on day 100
+    full = pd.concat([early, late], axis=1).assign(VAS=50.0)
+    ctx_full = Context(panel_from(full), None, CFG)
+    ctx_prefix = Context(panel_from(full.iloc[:90]), None, CFG)
+    assert len(ctx_full.dates) == 400                       # old full-panel median rule erased the first 100
+    assert ctx_full.dates[:90].equals(ctx_prefix.dates)
+    assert ctx_full.calendar_id == "causal_count_v1"
+    stray = full.copy()
+    stray.iloc[200, 1:] = np.nan                            # a stray row with 1 priced ticker is not a session
+    assert len(Context(panel_from(stray), None, CFG).dates) == 399
+
+
+def test_f04_risk_exit_cadence_and_missing_rank():
+    names = [f"T{i:02d}" for i in range(10)]
+    without_t00 = [n for n in names if n != "T00"]
+    cfg = dict(CFG, broker="flat", min_position=2500.0, min_order=1000.0)
+    # quarterly alpha cadence: T00 drops out of the eligible/scored set in non-quarter months -> sold after
+    # the 2nd consecutive monthly miss (monthly protective cadence), not delayed to the next quarter
+    adj = flat(days=420)
+    ctx = Context(panel_from(adj), None, dict(cfg, start=str(adj.index[70].date())))
+    rows = ctx.decision_rows(str(adj.index[70].date()))
+    months = [ctx.dates[i].month for i in rows]
+    k0 = next(k for k, m in enumerate(months) if m == 6)     # bought at a June (quarter) decision
+    order = lambda k, i: ranks_series(names if k <= k0 else without_t00)
+    _, _, r = run(adj, Variant(n=3, regime=False, capital=9000, rebalance="Q"), cfg,
+                  lambda k, i: order(k, i) if k >= k0 else ranks_series(names))
+    o = r["orders"]
+    sell = o[(o["ticker"] == "T00") & (o["side"] == "SELL")]
+    assert len(sell) == 1 and sell.iloc[0]["reason"] == "ineligible"
+    assert sell.iloc[0]["decision_date"].month == 8           # Jul miss 1, Aug miss 2: risk exit off-quarter
+    # monthly: a single month with a missing rank does not trigger an immediate rank sale
+    one_gap = lambda k, i: ranks_series(without_t00 if k == 1 else names)
+    _, _, r = run(flat(), Variant(n=3, regime=False, capital=9000), cfg, one_gap)
+    o = r["orders"]
+    assert not ((o["ticker"] == "T00") & (o["side"] == "SELL")).any()
+
+
+def test_f05_valuation_through_latest_session():
+    idx = pd.bdate_range("2016-01-01", "2017-03-23")
+    adj = pd.DataFrame({f"T{i:02d}": np.linspace(10, 12, len(idx)) for i in range(10)} | {"VAS": 50.0}, index=idx)
+    cfg = dict(CFG, broker="flat", min_position=2500.0, min_order=1000.0)
+    names = [f"T{i:02d}" for i in range(10)]
+    _, _, r = run(adj, Variant(n=3, regime=False, capital=9000), cfg, lambda k, i: ranks_series(names))
+    assert r["valuation_date"] == pd.Timestamp("2017-03-23") and r["equity"].index[-1] == pd.Timestamp("2017-03-23")
+    assert r["last_execution_date"] == pd.Timestamp("2017-03-01")
+    assert r["monthly"].index[-1] == pd.Timestamp("2017-02-28")   # completed months only
+    held = {t: q for t, q in r["final_book"].items() if q}
+    marks = adj.iloc[-1]
+    assert abs(r["equity"].iloc[-1] - (r["cash"] + sum(q * marks[t] for t, q in held.items()))) < 1e-6
+    # an explicit end date is respected: nothing executes after it
+    cfg_end = dict(cfg, start=str(adj.index[70].date()))
+    ctx = Context(panel_from(adj), None, cfg_end)
+    rc = {("RAMOM", i): ranks_series(names) for i in ctx.decision_rows(cfg_end["start"])}
+    r2 = run_backtest_v2(ctx, Variant(n=3, regime=False, capital=9000), cfg_end, rc, end="2016-12-31")
+    assert r2["orders"]["date"].max() <= pd.Timestamp("2016-12-31") and r2["equity"].index[-1] <= pd.Timestamp("2016-12-31")
+
+
+if __name__ == "__main__":
+    started = time.time()
+    for name, fn in list(globals().items()):
+        if name.startswith("test_"):
+            fn()
+            print("ok", name)
+    print(f"all engine repair checks passed in {time.time() - started:.1f}s")
