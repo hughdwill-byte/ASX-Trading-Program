@@ -3630,7 +3630,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 print(highlight_text(line, bool(item.get("is_asx200"))))
             print(f"\nCapital used: {result['capital'] - result['remaining_capital']:.2f}")
             print(f"Capital remaining: {result['remaining_capital']:.2f}")
-    elif args.command in {"strat-backtest", "strat-recommend", "strat-publish", "tfm-cache", "asic-download"}:
+    elif args.command in {"strat-backtest", "strat-recommend", "strat-publish", "tfm-cache", "asic-download",
+                          "strat-explain-config", "strat-opt-study"}:
         from ml.strategy_cli import run_cli as run_strategy_cli
 
         orchestrator.config_path = config_path

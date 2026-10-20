@@ -42,6 +42,10 @@ def add_cli_args(sub) -> None:
     tc.add_argument("--batch-size", type=int, default=128)
     asic = sub.add_parser("asic-download", help="Download ASIC daily short-position reports (resumable).")
     asic.add_argument("--start", default="2015-06-01")
+    sub.add_parser("strat-explain-config", help="Resolved strategy settings: values, origins, units, active/shadowed.")
+    st = sub.add_parser("strat-opt-study", help="RESEARCH: matched study of the uncapped optimiser vs registered controls.")
+    st.add_argument("--end", help="Last date to include (default: latest data).")
+    st.add_argument("--capitals", default="10000,50000", help="Comma-separated satellite-only capitals (core 0).")
 
 
 def strategy_config(orchestrator) -> dict:
@@ -132,16 +136,124 @@ def run_cli(args, orchestrator) -> int:
 
         data_asic.download(project_path(str(orchestrator.config.data.base_path), "asic_short"), args.start)
         return 0
+    if args.command == "strat-publish":   # local JSON only: no market download, no model
+        return strat_publish(cfg)
+    if args.command == "strat-explain-config":
+        return strat_explain_config(cfg, orchestrator)
     ctx = build_context(orchestrator, cfg)
+    if args.command == "strat-opt-study":
+        return strat_opt_study(ctx, cfg, args)
     if args.command == "tfm-cache":
         return tfm_cache(ctx, cfg, args)
     if args.command == "strat-backtest":
         return strat_backtest(ctx, cfg, args)
     if args.command == "strat-recommend":
         return strat_recommend(ctx, cfg, args)
-    if args.command == "strat-publish":
-        return strat_publish(cfg)
     return 1
+
+
+def strat_explain_config(cfg: dict, orchestrator) -> int:
+    import yaml
+
+    from ml.policy_spec import explain_config
+
+    path = getattr(orchestrator, "config_path", None)
+    raw = {}
+    if path and pathlib.Path(path).exists() and str(path).endswith((".yaml", ".yml")):
+        raw = (yaml.safe_load(pathlib.Path(path).read_text()) or {}).get("strategy") or {}
+    frozen_path = RESULTS / "frozen_choice.json"
+    frozen = json.loads(frozen_path.read_text()) if frozen_path.exists() else {}
+    report = explain_config(DEFAULTS, raw, frozen.get("settings", frozen))
+    for r in report["rows"]:
+        print(f"{r['key']:<22} {str(r['value'])[:28]:<28} {r['origin']:<11} {r['units']:<14} {r['status']:<12} {r['note']}")
+    for f in report["frozen"]:
+        print(f"frozen {f['setting']}: {f['frozen_variant']} ({f['note']})")
+    return 0
+
+
+def _atomic_write(path: pathlib.Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
+
+def _code_commit() -> Optional[str]:
+    import subprocess
+
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=str(RESULTS.parent),
+                              timeout=10).stdout.strip() or None
+    except Exception:
+        return None
+
+
+def data_identity(ctx: Context) -> str:
+    import hashlib
+
+    h = hashlib.sha1()
+    h.update(f"{ctx.calendar_id}|{ctx.dates[0]}|{ctx.dates[-1]}|{len(ctx.dates)}|{','.join(ctx.A.columns)}".encode())
+    h.update(pd.util.hash_pandas_object(ctx.A.iloc[-260:].fillna(-1), index=True).to_numpy().tobytes())
+    return h.hexdigest()[:12]
+
+
+def strat_opt_study(ctx: Context, cfg: dict, args, results_dir: Optional[pathlib.Path] = None) -> int:
+    """Registered matched study: corrected legacy N5/N8, VAS, and the OptPolicy controlled family on the same
+    panel, universe, fees, timing and benchmark intervals. RESEARCH ONLY: writes results/opt_study/, never
+    recommendation.json, frozen_choice.json or a tier."""
+    from ml.policies import run_backtest_opt
+    from ml.policy_spec import controlled_family, neighbours
+
+    started = time.time()
+    end = args.end
+    capitals = [float(c) for c in str(args.capitals).split(",") if c.strip()]
+    ranks = build_rank_cache(ctx, ["RAMOM"], end=end, start=None)
+    ew_m = ew_universe(ctx, cfg, end)
+    family = controlled_family("RAMOM")
+    main = next(p for p in family if p.holding_cap is None and p.sizing == "covariance_cost_aware")
+    rows, manifest = [], {"schema": "opt_study_v1", "status": "research only - not validated, not for trading",
+                          "code_commit": _code_commit(), "data_id": data_identity(ctx), "calendar_id": ctx.calendar_id,
+                          "start": cfg["start"], "end": end or str(ctx.dates[-1].date()), "broker": cfg.get("broker"),
+                          "price_basis": "adjusted_total_return_synthetic",
+                          "policies": [p.to_json() for p in family + neighbours(main)],
+                          "legacy_controls": ["RAMOM_N5_noreg_B1", "RAMOM_N8_noreg_B3"],
+                          "neighbour_rule": "gamma x0.5, gamma x2, name_limit x0.5 (declared before evaluation)",
+                          "capacity_rule_i": "funded_capacity(capital) >= 3 (fee-aware); chosen counts reported separately",
+                          "promotion": "blocked: OptPolicy tiers are not computed; owner account policy unset"}
+    for capital in capitals:
+        setting = f"{int(capital)}_core0"
+        bench = run_backtest_v2(ctx, Variant(core_weight=1.0, capital=capital), cfg, ranks, end)
+        bench_m = bench["monthly"]
+        runs = {"BENCH_TR": bench}
+        for v in (Variant(n=5, regime=False, buffer_mult=1, capital=capital), Variant(n=8, regime=False, capital=capital)):
+            runs[v.id] = run_backtest_v2(ctx, v, cfg, ranks, end)
+        for pol in family + neighbours(main):
+            pol = dataclasses.replace(pol, capital=capital)
+            t0 = time.monotonic()
+            runs[pol.id] = run_backtest_opt(ctx, pol, cfg, ranks, end)
+            logger.info("%s %s in %.0fs", setting, pol.id, time.monotonic() - t0)
+        for vid, r in runs.items():
+            for period in val.PERIODS:
+                m = val.metrics(r, bench_m, ew_m, period)
+                dec = r.get("decisions")
+                extra = {}
+                if dec is not None and len(dec):
+                    sc = dec["stock_count"].dropna()
+                    extra = {"count_min": float(sc.min()) if len(sc) else None, "count_median": float(sc.median()) if len(sc) else None,
+                             "count_max": float(sc.max()) if len(sc) else None,
+                             "effective_count_mean": float(dec["effective_count"].dropna().mean()) if len(sc) else None,
+                             "no_trade_share": float(dec["status"].str.startswith("no_trade").mean()),
+                             "failures": int((~dec["status"].isin(["proposal", "no_trade_optimal", "control_targets",
+                                                                     "no_trade_forecast_unavailable"])).sum()),
+                             "runtime_seconds": r.get("runtime_seconds")}
+                rows.append({"setting": setting, "id": vid, "period": period, "funded_capacity": r.get("n_eff"),
+                             "sharpe_definition": "zero-rate monthly Sharpe x sqrt(12)", **extra, **m})
+    out = (results_dir or RESULTS) / "opt_study"
+    manifest["runtime_minutes"] = (time.time() - started) / 60
+    _atomic_write(out / "compare.json", json.dumps(sanitize_for_json(rows), indent=1))
+    _atomic_write(out / "manifest.json", json.dumps(sanitize_for_json(manifest), indent=1, default=str))
+    print(f"opt study written to {out} in {manifest['runtime_minutes']:.1f} min (research only)")
+    return 0
 
 
 # ---- tfm-cache -------------------------------------------------------------------------------
